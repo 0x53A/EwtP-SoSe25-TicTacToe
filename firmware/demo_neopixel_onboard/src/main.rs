@@ -23,6 +23,8 @@ use microfft::real::rfft_512;
 use smart_leds::RGB8;
 use smart_leds::SmartLedsWrite;
 
+use embedded_hal::delay::DelayNs;
+
 type NeopixelT<'a> = ws2812_spi::Ws2812<esp_hal::spi::master::Spi<'a, esp_hal::Blocking>>;
 
 #[main]
@@ -39,7 +41,7 @@ fn _main() -> Result<!> {
     esp_alloc::heap_allocator!(size: 72 * 1024);
 
     let peripherals: Peripherals = esp_hal::init(esp_hal::Config::default());
-    let delay = Delay::new();
+    let mut delay = Delay::new();
     let io = Io::new(peripherals.IO_MUX);
 
     // Setup SPI for NeoPixel
@@ -62,15 +64,13 @@ fn _main() -> Result<!> {
     let red = smart_leds::colors::RED;
     neopixel.write([blue]).map_err(|err| anyhow!("{:?}", err))?;
 
-    let mut buffer: Vec<u8, 256> = Vec::new();
-
     loop {
         neopixel.write([green]).map_err(|err| anyhow!("{:?}", err))?;
-        delay.delay_ms(1000);
+        delay.delay_ms(100);
         neopixel.write([blue]).map_err(|err| anyhow!("{:?}", err))?;
-        delay.delay_ms(1000);
+        delay.delay_ms(100);
         neopixel.write([red]).map_err(|err| anyhow!("{:?}", err))?;
-        delay.delay_ms(1000);
+        delay.delay_ms(100);
     }
 }
 
