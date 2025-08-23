@@ -27,6 +27,10 @@ use embedded_hal::delay::DelayNs;
 
 type NeopixelT<'a> = ws2812_spi::Ws2812<esp_hal::spi::master::Spi<'a, esp_hal::Blocking>>;
 
+
+esp_bootloader_esp_idf::esp_app_desc!();
+
+
 #[main]
 fn main() -> ! {
     println!("Hello, world!");

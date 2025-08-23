@@ -1,6 +1,6 @@
 Install rustup: https://rustup.rs/
 
-
+Ins
 
 ```sh
 # once
