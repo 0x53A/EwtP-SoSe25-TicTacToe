@@ -37,7 +37,7 @@ esp-wifi = { version = "0.15.0", features = ["esp32s3", "esp-now"] }
 esp-hal-wifimanager = "0.1.0"
 microfft = "0.6.0"
 libm = "0.2.15"
-tinyusb-sys = { version = "0.1.0", features = ["host", "esp32s3", "hid"] }
+tinyusb-sys = { git = "https://github.com/0x53A/tinyusb-sys-rs", features = ["host", "esp32s3", "hid"] }
 #esp-radio = { git = "https://github.com/esp-rs/esp-hal" }
 
 

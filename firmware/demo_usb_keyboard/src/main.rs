@@ -54,6 +54,7 @@ fn _main() -> Result<!> {
 
 
     // todo
+    tinyusb_sys::
 
     // esp_hal::
 
