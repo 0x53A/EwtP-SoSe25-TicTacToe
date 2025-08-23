@@ -35,3 +35,8 @@ Dabei verwaltet der Matlab Code den abstrakten Spielzustand und die Firmware ist
 Der Matlab Code hat daher keinerlei Kentnisse über die tatsächliche Laufzeitumgebung.
 
 Für Testzwecke kann der gleiche Matlab Code auch auf dem Computer ausgeführt werden.
+
+
+# Alternative
+
+Alles über matlab code, Neopixel: https://de.mathworks.com/matlabcentral/fileexchange/72707-neopixel-add-on-library-for-arduino

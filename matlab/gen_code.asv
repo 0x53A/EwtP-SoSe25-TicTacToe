@@ -4,4 +4,4 @@
    playerTurn = 1; % Example input
    move = [1,2];
    % Generate C code
-   codegen tic_tac_toe -args {current_state, playerTurn, move} -c
+   codegen tictactoe -args {a, b} -c
