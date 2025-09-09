@@ -77,3 +77,9 @@ SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="55d3", MODE="0666"
 sudo udevadm control --reload-rules
 sudo udevadm trigger
 ```
+
+Then just run it as usual
+
+```sh
+cargo run --release
+```
