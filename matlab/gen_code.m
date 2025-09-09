@@ -1,7 +1,0 @@
-
-     % Define the function inputs
-   current_state = [0,0,0;0,0,0;0,0,0]; % Example input
-   playerTurn = 1; % Example input
-   move = [1,2];
-   % Generate C code
-   codegen tic_tac_toe -args {current_state, playerTurn, move} -c
