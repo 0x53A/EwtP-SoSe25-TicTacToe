@@ -15,26 +15,6 @@ source $HOME/export-esp.sh
 
 This program needs to compile the C-library "tinyusb" and therefore it's easiest to compile it under Linux (including WSL).
 
-```sh
-# set path to your xtensa toolchain
-export XTENSA_TOOLCHAIN=/home/lukas/.rustup/toolchains/esp/xtensa-esp-elf/esp-14.2.0_20240906/xtensa-esp-elf/bin
-
-# tell the cc crate to use the cross-compiler for that target
-export CC_xtensa_esp32s3_none_elf="$XTENSA_TOOLCHAIN/xtensa-esp32s3-elf-gcc"
-export AR_xtensa_esp32s3_none_elf="$XTENSA_TOOLCHAIN/xtensa-esp32s3-elf-ar"
-
-# tell cargo which linker to invoke for the target
-export CARGO_TARGET_XTENSA_ESP32S3_NONE_ELF_LINKER="$CC_xtensa_esp32s3_none_elf"
-```
-
-```sh
-export BINDGEN_EXTRA_CLANG_ARGS="-I/home/lukas/.rustup/toolchains/esp/xtensa-esp-elf/esp-14.2.0_20240906/xtensa-esp-elf/xtensa-esp-elf/include"
-
-export LIBCLANG_PATH=/home/lukas/.rustup/toolchains/esp/xtensa-esp32-elf-clang/esp-19.1.2_20250225/esp-clang/lib
-```
-
-
-------
 
 When running natively under Linux, you can just run the program
 
