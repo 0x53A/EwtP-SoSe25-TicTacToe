@@ -63,4 +63,17 @@ usbipd bind --busid 1-5
 usbipd attach --wsl --busid 1-5
 ```
 
-You'll need to add the udev rules according to the documentation: https://probe.rs/docs/getting-started/probe-setup/
+You'll need to add the udev rules:
+
+```sh
+sudo nano /etc/udev/rules.d/99-serial-acm.rules
+```
+
+```
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="55d3", MODE="0666"
+```
+
+```sh
+sudo udevadm control --reload-rules
+sudo udevadm trigger
+```

@@ -1,26 +1,192 @@
 use core::ffi::c_char;
 use core::ffi::c_void;
+use core::sync::atomic::AtomicBool;
 use core::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 
+use esp_hal::interrupt::CpuInterrupt;
 use esp_hal::interrupt::Priority;
 use esp_hal::system::Cpu;
 use esp_println::{print, println};
 use esp32s3::Interrupt;
+use esp32s3::usb0::GINTSTS;
+use esp32s3::usb0::gintsts::GINTSTS_SPEC;
 
 // store the registered handler and arg so the trampoline can forward the interrupt
 static TUSB_HANDLER: AtomicUsize = AtomicUsize::new(0);
 static TUSB_HANDLER_ARG: AtomicUsize = AtomicUsize::new(0);
 
+static TUSB_BOUND: AtomicBool = AtomicBool::new(false);
+
+pub static INTERRUPT_COUNTER: AtomicU32 = AtomicU32::new(0);
+
+unsafe fn dump_usb_mode_and_clear() {
+    // steal PAC handles locally
+    let usb0 = esp32s3::USB0::steal();
+    let usb_wrap = esp32s3::USB_WRAP::steal();
+    let usb_dev = esp32s3::USB_DEVICE::steal();
+
+    // read typed fields where available
+    let gint = usb0.gintsts().read();
+    let gintmsk = usb0.gintmsk().read().bits();
+    let gotg = usb0.gotgint().read().bits();
+    let gahb = usb0.gahbcfg().read().bits();
+    let gusb = usb0.gusbcfg().read().bits();
+
+    let wrap_otg = usb_wrap.otg_conf().read().bits();
+    let dev_int_raw = usb_dev.int_raw().read().bits();
+
+    println!("[dump] GINTSTS bits={:#010x}", usb0.gintsts().read().bits());
+    println!(
+        "[dump] flags: CURMOD_INT={} MODEMIS={} SOF={} RXFLVL={}",
+        gint.curmod_int().bit(),
+        gint.modemis().bit(),
+        gint.sof().bit(),
+        gint.rxflvi().bit()
+    );
+    println!(
+        "[dump] GINTMSK={:#010x} GOTGINT={:#010x} GAHBCFG={:#010x} GUSBCFG={:#010x}",
+        gintmsk, gotg, gahb, gusb
+    );
+    println!(
+        "[dump] WRAP_OTG={:#010x} DEV_INT_RAW={:#010x}",
+        wrap_otg, dev_int_raw
+    );
+
+    // // conservative clears (debug only):
+    // // - clear MODEMIS in GINTSTS (write-1-to-clear field)
+    // if gint.modemis().bit() {
+    //     // using field writer (write-1-to-clear)
+    //     usb0.gintsts().write(|w| w.modemis().clear_bit_by_one());
+    //     println!("[dump] cleared GINTSTS.MODEMIS");
+    // }
+
+    // // - clear wrapper SERIAL_IN_EMPTY (USB_DEVICE.INT_RAW bit 3) to stop wrapper-level NVIC if set
+    // if (dev_int_raw & (1 << 3)) != 0 {
+    //     usb_dev.int_clr().write(|w| w.serial_in_empty().clear_bit_by_one());
+    //     println!("[dump] cleared USB_DEVICE.INT_RAW.SERIAL_IN_EMPTY");
+    // }
+}
+
 pub unsafe extern "C" fn interrupt_trampoline() {
-    // load saved handler and arg and forward the interrupt
+    INTERRUPT_COUNTER.fetch_add(1, Ordering::SeqCst);
+
+    // snapshot relevant registers using PAC readers (typed accessors)
+    let usb0 = esp32s3::USB0::steal();
+    let pre_gint = usb0.gintsts().read();
+    let pre_gintmsk = usb0.gintmsk().read().bits();
+    let pre_gotgint = usb0.gotgint().read().bits();
+    let pre_gahbcfg = usb0.gahbcfg().read().bits();
+    let pre_gusbcfg = usb0.gusbcfg().read().bits();
+
+    let usb_dev = esp32s3::USB_DEVICE::steal();
+    let pre_dev_int_raw = usb_dev.int_raw().read().bits();
+    let pre_dev_int_ena = usb_dev.int_ena().read().bits();
+    let pre_dev_int_st = usb_dev.int_st().read().bits();
+
+    let usb_wrap = esp32s3::USB_WRAP::steal();
+    let pre_wrap_otg = usb_wrap.otg_conf().read().bits();
+
+    // forward to saved handler
     let h = TUSB_HANDLER.load(Ordering::SeqCst);
     if h == 0 {
         return;
     }
     let arg = TUSB_HANDLER_ARG.load(Ordering::SeqCst) as *mut c_void;
-    let handler: extern "C" fn(*mut c_void) = unsafe { core::mem::transmute(h) };
-    // calling the original handler
+    let handler: extern "C" fn(*mut c_void) = core::mem::transmute(h);
     handler(arg);
+
+    // post snapshot using readers
+    let post_gint = usb0.gintsts().read();
+    let post_gintmsk = usb0.gintmsk().read().bits();
+    let post_gotgint = usb0.gotgint().read().bits();
+    let post_gahbcfg = usb0.gahbcfg().read().bits();
+    let post_gusbcfg = usb0.gusbcfg().read().bits();
+
+    let post_dev_int_raw = usb_dev.int_raw().read().bits();
+    let post_dev_int_ena = usb_dev.int_ena().read().bits();
+    let post_dev_int_st = usb_dev.int_st().read().bits();
+
+    let post_wrap_otg = usb_wrap.otg_conf().read().bits();
+
+    // print only if any named GINTSTS field was set before and remains set after
+    macro_rules! check_gint {
+        ($name:expr, $field:ident) => {
+            if pre_gint.$field().bit() && post_gint.$field().bit() {
+                println!("[irq] USB0.GINTSTS {}", $name);
+            }
+        };
+    }
+
+    let mut any_remaining = false;
+
+    // // check commonly interesting fields (names come from the PAC / SVD)
+    // check_gint!("CURMOD_INT", curmod_int);
+    // any_remaining |= pre_gint.curmod_int().bit() && post_gint.curmod_int().bit();
+    // check_gint!("MODEMIS", modemis);
+    // any_remaining |= pre_gint.modemis().bit() && post_gint.modemis().bit();
+    // check_gint!("OTGINT", otgint);
+    // any_remaining |= pre_gint.otgint().bit() && post_gint.otgint().bit();
+    // check_gint!("SOF", sof);
+    // any_remaining |= pre_gint.sof().bit() && post_gint.sof().bit();
+    // check_gint!("RXFLVI", rxflvi);
+    // any_remaining |= pre_gint.rxflvi().bit() && post_gint.rxflvi().bit();
+    // check_gint!("NPTXFEMP", nptxfemp);
+    // any_remaining |= pre_gint.nptxfemp().bit() && post_gint.nptxfemp().bit();
+    // check_gint!("GINNAKEFF", ginnakeff);
+    // any_remaining |= pre_gint.ginnakeff().bit() && post_gint.ginnakeff().bit();
+    // check_gint!("GOUTNAKEFF", goutnakeff);
+    // any_remaining |= pre_gint.goutnakeff().bit() && post_gint.goutnakeff().bit();
+    // check_gint!("ERLYSUSP", erlysusp);
+    // any_remaining |= pre_gint.erlysusp().bit() && post_gint.erlysusp().bit();
+    // check_gint!("USBSUSP", usbsusp);
+    // any_remaining |= pre_gint.usbsusp().bit() && post_gint.usbsusp().bit();
+    // check_gint!("USBRST", usbrst);
+    // any_remaining |= pre_gint.usbrst().bit() && post_gint.usbrst().bit();
+    // check_gint!("ENUMDONE", enumdone);
+    // any_remaining |= pre_gint.enumdone().bit() && post_gint.enumdone().bit();
+    // check_gint!("EOPF", eopf);
+    // any_remaining |= pre_gint.eopf().bit() && post_gint.eopf().bit();
+    // check_gint!("EPMIS", epmis);
+    // any_remaining |= pre_gint.epmis().bit() && post_gint.epmis().bit();
+    // check_gint!("IEPINT", iepint);
+    // any_remaining |= pre_gint.iepint().bit() && post_gint.iepint().bit();
+    // check_gint!("OEPINT", oepint);
+    // any_remaining |= pre_gint.oepint().bit() && post_gint.oepint().bit();
+    // check_gint!("INCOMPISOIN", incompisoin);
+    // any_remaining |= pre_gint.incompisoin().bit() && post_gint.incompisoin().bit();
+    // check_gint!("INCOMPIP", incompip);
+    // any_remaining |= pre_gint.incompip().bit() && post_gint.incompip().bit();
+    // check_gint!("FETSUSP", fetsusp);
+    // any_remaining |= pre_gint.fetsusp().bit() && post_gint.fetsusp().bit();
+    // check_gint!("RESETDET", resetdet);
+    // any_remaining |= pre_gint.resetdet().bit() && post_gint.resetdet().bit();
+    // check_gint!("PRTLNT", prtlnt);
+    // any_remaining |= pre_gint.prtlnt().bit() && post_gint.prtlnt().bit();
+    // check_gint!("HCHLNT", hchlnt);
+    // any_remaining |= pre_gint.hchlnt().bit() && post_gint.hchlnt().bit();
+    // check_gint!("PTXFEMP", ptxfemp);
+    // any_remaining |= pre_gint.ptxfemp().bit() && post_gint.ptxfemp().bit();
+    // check_gint!("CONIDSTSCHNG", conidstschng);
+    // any_remaining |= pre_gint.conidstschng().bit() && post_gint.conidstschng().bit();
+    // check_gint!("DISCONNINT", disconnint);
+    // any_remaining |= pre_gint.disconnint().bit() && post_gint.disconnint().bit();
+    // check_gint!("SESSREQINT", sessreqint);
+    // any_remaining |= pre_gint.sessreqint().bit() && post_gint.sessreqint().bit();
+    // check_gint!("WKUPINT", wkupint);
+    // any_remaining |= pre_gint.wkupint().bit() && post_gint.wkupint().bit();
+
+    // // also check USB_DEVICE wrapper raw bits numerically (PAC may provide field accessors too)
+    // let remaining_dev_int_raw = pre_dev_int_raw & post_dev_int_raw;
+
+    // if any_remaining || remaining_dev_int_raw != 0 {
+    //     println!(
+    //         "[irq] remaining after handler: USB0 gintmsk={:#010x} USB_DEVICE int_raw={:#010x}",
+    //         post_gintmsk, remaining_dev_int_raw
+    //     );
+    //     // (optionally) clear wrapper or gintsts for debug as before...
+    // }
+
+    // dump_usb_mode_and_clear();
 }
 
 #[unsafe(no_mangle)]
@@ -29,14 +195,18 @@ pub extern "C" fn tusb_esp32_int_enable(
     handler: extern "C" fn(*mut c_void),
     arg: *mut c_void,
 ) {
+    // println!("[tusb_esp32_int_enable] irq_num={}, handler={:?}, arg={:?}", irq_num, handler, arg);
     assert!(irq_num == esp32s3::Interrupt::USB as u32);
 
     TUSB_HANDLER.store(handler as usize, Ordering::SeqCst);
     TUSB_HANDLER_ARG.store(arg as usize, Ordering::SeqCst);
 
-    unsafe {
-        esp_hal::interrupt::bind_interrupt(esp32s3::Interrupt::USB, interrupt_trampoline);
+    if !TUSB_BOUND.swap(true, Ordering::SeqCst) {
+        unsafe {
+            esp_hal::interrupt::bind_interrupt(esp32s3::Interrupt::USB, interrupt_trampoline);
+        }
     }
+
     if let Err(err) = esp_hal::interrupt::enable(Interrupt::USB, Priority::Priority2) {
         panic!("Failed to enable USB interrupt: {:?}", err);
     }
@@ -44,12 +214,13 @@ pub extern "C" fn tusb_esp32_int_enable(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn tusb_esp32_int_disable(irq_num: u32) {
-    assert!(irq_num == esp32s3::Interrupt::USB as u32);
-
-    TUSB_HANDLER.store(0, Ordering::SeqCst);
-    TUSB_HANDLER_ARG.store(0, Ordering::SeqCst);
-
     esp_hal::interrupt::disable(Cpu::ProCpu, Interrupt::USB);
+
+    // println!("[tusb_esp32_int_disable] irq_num={}", irq_num);
+    // assert!(irq_num == esp32s3::Interrupt::USB as u32);
+
+    // TUSB_HANDLER.store(0, Ordering::SeqCst);
+    // TUSB_HANDLER_ARG.store(0, Ordering::SeqCst);
 }
 
 #[unsafe(no_mangle)]
@@ -87,6 +258,19 @@ pub extern "C" fn tusb_time_millis_api() -> u32 {
     program_start.elapsed().as_millis() as u32
 }
 
+pub type HidReportCallback = fn(dev_addr: u8, instance: u8, report: *const u8, len: u16);
+static RUST_HID_HANDLER: AtomicUsize = AtomicUsize::new(0);
+
+pub fn set_rust_hid_report_callback(cb: Option<HidReportCallback>) -> Option<HidReportCallback> {
+    let prev = RUST_HID_HANDLER.swap(cb.map(|f| f as usize).unwrap_or(0), Ordering::SeqCst);
+    if prev == 0 {
+        None
+    } else {
+        // SAFETY: we only store function pointers of type `HidReportCallback` here.
+        Some(unsafe { core::mem::transmute(prev) })
+    }
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn tuh_hid_report_received_cb(
     dev_addr: u8,
@@ -94,10 +278,17 @@ pub extern "C" fn tuh_hid_report_received_cb(
     report: *const u8,
     len: u16,
 ) {
-    println!(
-        "HID report received: dev_addr={}, instance={}, report={:?}, len={}",
-        dev_addr, instance, report, len
-    );
+    // Forward to any registered pure-Rust callback first (if present).
+    let rust_h = RUST_HID_HANDLER.load(Ordering::SeqCst);
+    if rust_h != 0 {
+        let cb: HidReportCallback = unsafe { core::mem::transmute(rust_h) };
+        cb(dev_addr, instance, report, len);
+    }
+
+    // continue to request to receive report
+    if !unsafe { tinyusb_sys::tuh_hid_receive_report(dev_addr, instance) } {
+        println!("Error: cannot request report");
+    }
 }
 
 unsafe fn cstr_to_str(ptr: *const c_char) -> &'static str {
@@ -293,7 +484,7 @@ pub unsafe extern "C" fn tusb_esp32_logv(tag: *const c_char, fmt: *const c_char,
     if !fmt.ends_with("\n") {
         println!("");
     }
-    // print_parsed_args(tag, fmt, &mut args);
+    print_parsed_args(tag, fmt, &mut args);
     println!("");
 }
 
@@ -309,7 +500,7 @@ pub unsafe extern "C" fn tusb_esp32_early_logv(
     if !fmt.ends_with("\n") {
         println!("");
     }
-    // print_parsed_args(tag, fmt, &mut args);
+    print_parsed_args(tag, fmt, &mut args);
     println!("");
 }
 
@@ -320,7 +511,7 @@ pub unsafe extern "C" fn printf(fmt: *const c_char, mut args: ...) -> i32 {
     if !fmt.ends_with("\n") {
         println!("");
     }
-    // print_parsed_args("", fmt, &mut args);
+    print_parsed_args("", fmt, &mut args);
     println!("");
     0
 }
@@ -328,13 +519,13 @@ pub unsafe extern "C" fn printf(fmt: *const c_char, mut args: ...) -> i32 {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn puts(s: *const c_char) -> i32 {
     let s = unsafe { cstr_to_str(s) };
-    println!("{}", s);
+    print!("{}", s);
     1
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn putchar(c: i32) -> i32 {
-    println!("{}", (c as u8) as char);
+    print!("{}", (c as u8) as char);
     c
 }
 
