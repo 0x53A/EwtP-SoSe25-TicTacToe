@@ -61,11 +61,7 @@ impl BoardState {
         });
 
         let new_state = BoardState {
-            board: new_state
-                .map(|v| Player::from_u8(v))
-                .to_vec()
-                .try_into()
-                .unwrap(),
+            board: new_state.map(Player::from_u8).to_vec().try_into().unwrap(),
             current_player: Player::from_u8(next_player_turn).unwrap(),
         };
 
@@ -101,7 +97,7 @@ pub async fn game_loop(
     matlab_code::initialize();
 
     let mut game_stage = GameStage::InProgress(BoardState::new());
-    output.signal(game_stage.clone());
+    output.signal(game_stage);
 
     loop {
         let input = input.wait().await;
@@ -111,13 +107,13 @@ pub async fn game_loop(
                 // after a game, wait for enter to create a new game
                 if input == KeyboardInput::Enter {
                     game_stage = GameStage::InProgress(BoardState::new());
-                    output.signal(game_stage.clone());
+                    output.signal(game_stage);
                 }
                 continue;
             }
             GameStage::InProgress(board_state) | GameStage::IllegalMove(board_state, _) => {
                 let game_move = match input {
-                    KeyboardInput::Numpad(n) if n >= 1 && n <= 9 => {
+                    KeyboardInput::Numpad(n) if (1..=9).contains(&n) => {
                         // in game logic, 1 is top-left, 2 is top-middle, ..., 9 is bottom-right
                         // in numpad, 1 is bottom-left, 2 is bottom-middle, ...,
                         match n {
@@ -140,7 +136,7 @@ pub async fn game_loop(
                 game_stage = board_state.make_move(game_move);
 
                 // update the neopixel matrix
-                output.signal(game_stage.clone());
+                output.signal(game_stage);
             }
         }
     }

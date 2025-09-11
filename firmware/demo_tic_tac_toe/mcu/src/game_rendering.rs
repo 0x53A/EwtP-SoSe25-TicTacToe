@@ -5,7 +5,8 @@ use esp_println::println;
 use smart_leds::RGB8;
 
 use crate::{
-    game::{self, BoardState, GameStage, Player}, MATRIX_WIDTH
+    MATRIX_WIDTH,
+    game::{GameStage, Player},
 };
 
 /// Convert from x,y coordinates to the linear NeoPixel index
@@ -51,7 +52,6 @@ pub async fn render_task(
 
     // wait for the inital value, until then, render a spinner
     {
-        let started = esp_hal::time::Instant::now();
         let mut i = 0;
 
         while !input_signal.signaled() {
@@ -88,12 +88,11 @@ pub async fn render_task(
     game_stage = input_signal.wait().await;
 
     loop {
-
         let board_state = match &game_stage {
             GameStage::InProgress(state)
             | GameStage::Won(_, state)
             | GameStage::Draw(state)
-            | GameStage::IllegalMove(state, _) => state.clone(),
+            | GameStage::IllegalMove(state, _) => *state,
         };
 
         let mut colors = [RGB8::new(0, 0, 0); 256];
@@ -140,6 +139,11 @@ pub async fn render_task(
                 let y = (i / 3) * 5 + 1;
                 draw_player(*player, (x, y));
             }
+        }
+
+        if let GameStage::IllegalMove(_, played_move) = game_stage {
+            // highlight the illegal move
+            // todo
         }
 
         // done rendering, push it out

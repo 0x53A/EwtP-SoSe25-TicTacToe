@@ -7,48 +7,36 @@ mod game;
 mod game_rendering;
 mod tinyusb_callbacks;
 
-use core::any::Any;
-
 use embassy_executor::Spawner;
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, signal::Signal};
 use embassy_time::Duration;
-use embedded_hal::delay::DelayNs;
 use esp_backtrace as _;
 use esp_hal::{
     delay::Delay,
     dma::{DmaRxBuf, DmaTxBuf},
     dma_buffers,
-    gpio::Io,
-    i2s::master::{DataFormat, Standard},
-    main,
     peripherals::Peripherals,
     system::{CpuControl, Stack},
     time::Rate,
     timer::{AnyTimer, timg::TimerGroup},
-    uart::Uart,
 };
 
 use anyhow::{Result, anyhow};
-use esp_println::{print, println};
-use heapless::Vec;
+use esp_println::println;
 use static_cell::StaticCell;
 
 use esp_alloc as _;
 
 use crate::{
-    game::{BoardState, GameStage, KeyboardInput, Player},
+    game::{GameStage, KeyboardInput},
     game_rendering::render_task,
 };
 
 extern crate alloc;
 
 use alloc::{boxed::Box, format};
-use core::ffi::c_void;
-use core::ptr;
 use core::ptr::addr_of_mut;
-use core::sync::atomic::{AtomicU8, Ordering};
 
-use microfft::real::rfft_512;
 use smart_leds::RGB8;
 use smart_leds::SmartLedsWrite;
 
@@ -151,7 +139,7 @@ async fn _main(spawner: Spawner) -> Result<!> {
     // Enable and configure USB peripheral
     setup_usb_peripheral();
 
-    let mut delay = Delay::new();
+    let _delay = Delay::new();
     let mut cpu_control = CpuControl::new(peripherals.CPU_CTRL);
 
     // Setup SPI for NeoPixel
@@ -233,12 +221,12 @@ async fn _main(spawner: Spawner) -> Result<!> {
 
         // Check if it's a keyboard report
         let proto = unsafe { tinyusb_sys::tuh_hid_interface_protocol(dev_addr, instance) };
-        if proto == tinyusb_sys::hid_interface_protocol_enum_t::HID_ITF_PROTOCOL_KEYBOARD as u8 {
-            if len as usize >= core::mem::size_of::<tinyusb_sys::hid_keyboard_report_t>() {
-                let report = unsafe { &*(report as *const tinyusb_sys::hid_keyboard_report_t) };
-                if let Some(key) = process_keyboard_input(report) {
-                    unsafe { KEYBOARD_INPUT_SIGNAL_REF.unwrap().signal(key) };
-                }
+        if proto == tinyusb_sys::hid_interface_protocol_enum_t::HID_ITF_PROTOCOL_KEYBOARD as u8
+            && len as usize >= core::mem::size_of::<tinyusb_sys::hid_keyboard_report_t>()
+        {
+            let report = unsafe { &*(report as *const tinyusb_sys::hid_keyboard_report_t) };
+            if let Some(key) = process_keyboard_input(report) {
+                unsafe { KEYBOARD_INPUT_SIGNAL_REF.unwrap().signal(key) };
             }
         }
     }));
@@ -259,7 +247,6 @@ async fn _main(spawner: Spawner) -> Result<!> {
 }
 
 fn process_keyboard_input(report: &tinyusb_sys::hid_keyboard_report_t) -> Option<KeyboardInput> {
-
     for &keycode in &report.keycode {
         if keycode == 0 {
             // No key pressed in this slot
@@ -294,12 +281,11 @@ fn process_keyboard_input(report: &tinyusb_sys::hid_keyboard_report_t) -> Option
             0x25 => KeyboardInput::Number(8), // 8
             0x26 => KeyboardInput::Number(9), // 9
 
-            0x52 => KeyboardInput::ArrowUp,    // Up Arrow
-            0x51 => KeyboardInput::ArrowDown,  // Down Arrow
-            0x50 => KeyboardInput::ArrowLeft,  // Left Arrow
-            0x4F => KeyboardInput::ArrowRight, // Right Arrow
-            0x58 |
-            0x28 => KeyboardInput::Enter,      // Enter key
+            0x52 => KeyboardInput::ArrowUp,      // Up Arrow
+            0x51 => KeyboardInput::ArrowDown,    // Down Arrow
+            0x50 => KeyboardInput::ArrowLeft,    // Left Arrow
+            0x4F => KeyboardInput::ArrowRight,   // Right Arrow
+            0x58 | 0x28 => KeyboardInput::Enter, // Enter key
 
             _ => continue, // Ignore other keys
         };
@@ -308,7 +294,7 @@ fn process_keyboard_input(report: &tinyusb_sys::hid_keyboard_report_t) -> Option
 
         return Some(key);
     }
-    return None;
+    None
 }
 
 // Set up the USB peripheral

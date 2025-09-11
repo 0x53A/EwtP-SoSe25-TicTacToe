@@ -3,13 +3,10 @@ use core::ffi::c_void;
 use core::sync::atomic::AtomicBool;
 use core::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 
-use esp_hal::interrupt::CpuInterrupt;
 use esp_hal::interrupt::Priority;
 use esp_hal::system::Cpu;
 use esp_println::{print, println};
 use esp32s3::Interrupt;
-use esp32s3::usb0::GINTSTS;
-use esp32s3::usb0::gintsts::GINTSTS_SPEC;
 
 // store the registered handler and arg so the trampoline can forward the interrupt
 static TUSB_HANDLER: AtomicUsize = AtomicUsize::new(0);
@@ -20,16 +17,18 @@ static TUSB_BOUND: AtomicBool = AtomicBool::new(false);
 pub static INTERRUPT_COUNTER: AtomicU32 = AtomicU32::new(0);
 
 pub unsafe extern "C" fn interrupt_trampoline() {
-    INTERRUPT_COUNTER.fetch_add(1, Ordering::SeqCst);
+    unsafe {
+        INTERRUPT_COUNTER.fetch_add(1, Ordering::SeqCst);
 
-    // forward to saved handler
-    let h = TUSB_HANDLER.load(Ordering::SeqCst);
-    if h == 0 {
-        return;
+        // forward to saved handler
+        let h = TUSB_HANDLER.load(Ordering::SeqCst);
+        if h == 0 {
+            return;
+        }
+        let arg = TUSB_HANDLER_ARG.load(Ordering::SeqCst) as *mut c_void;
+        let handler: extern "C" fn(*mut c_void) = core::mem::transmute(h);
+        handler(arg);
     }
-    let arg = TUSB_HANDLER_ARG.load(Ordering::SeqCst) as *mut c_void;
-    let handler: extern "C" fn(*mut c_void) = core::mem::transmute(h);
-    handler(arg);
 }
 
 #[unsafe(no_mangle)]
@@ -56,7 +55,7 @@ pub extern "C" fn tusb_esp32_int_enable(
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn tusb_esp32_int_disable(irq_num: u32) {
+pub extern "C" fn tusb_esp32_int_disable(_irq_num: u32) {
     esp_hal::interrupt::disable(Cpu::ProCpu, Interrupt::USB);
 }
 
@@ -120,11 +119,8 @@ extern "C" fn tuh_mount_cb(daddr: u8) {
                 "Got descriptor: Device {}: ID {:04x}:{:04x}",
                 daddr, vendor, product
             );
-            for inst in 0..2 {
-                unsafe {
-                    tinyusb_sys::tuh_hid_receive_report(daddr, inst);
-                }
-            }
+
+            tinyusb_sys::tuh_hid_receive_report(daddr, 0);
         } else {
             println!("Failed to get device descriptor for addr {}", daddr);
         }
@@ -241,19 +237,21 @@ pub extern "C" fn tuh_hid_report_received_cb(
 }
 
 unsafe fn cstr_to_str(ptr: *const c_char) -> &'static str {
-    if ptr.is_null() {
-        return "";
-    }
-    let mut len = 0usize;
-    // find NUL terminator
-    loop {
-        if *ptr.add(len) == 0 {
-            break;
+    unsafe {
+        if ptr.is_null() {
+            return "";
         }
-        len += 1;
+        let mut len = 0usize;
+        // find NUL terminator
+        loop {
+            if *ptr.add(len) == 0 {
+                break;
+            }
+            len += 1;
+        }
+        let slice = core::slice::from_raw_parts(ptr as *const u8, len);
+        core::str::from_utf8_unchecked(slice)
     }
-    let slice = core::slice::from_raw_parts(ptr as *const u8, len);
-    core::str::from_utf8_unchecked(slice)
 }
 
 // Helper: read n usize-sized words from args pointer and assemble into u64 (little-endian)
@@ -261,11 +259,7 @@ fn read_u64_from_words(words: &[usize]) -> u64 {
     let mut v: u64 = 0;
     let word_bytes = core::mem::size_of::<usize>();
     // little-endian target assumed
-    for (i, &w) in words
-        .iter()
-        .enumerate()
-        .take((8 + word_bytes - 1) / word_bytes)
-    {
+    for (i, &w) in words.iter().enumerate().take(8_usize.div_ceil(word_bytes)) {
         let shift = (i * word_bytes) * 8;
         v |= (w as u64) << shift;
     }
@@ -276,7 +270,7 @@ fn read_u64_from_words(words: &[usize]) -> u64 {
 // from args_ptr (pointer to an array of usize words) and print interpreted values.
 // This is intentionally conservative and aims to support common specifiers for debugging:
 // %d %i %u %x %X %p %s %c %f (double) and length modifiers l, ll.
-fn print_parsed_args(tag: &str, fmt: &str, args: &mut core::ffi::VaListImpl<'_>) {
+fn print_parsed_args(_tag: &str, fmt: &str, args: &mut core::ffi::VaListImpl<'_>) {
     let mut param_idx = 0usize;
 
     let mut chars = fmt.chars().peekable();
@@ -478,6 +472,7 @@ pub unsafe extern "C" fn putchar(c: i32) -> i32 {
     c
 }
 
+#[allow(non_upper_case_globals)]
 #[unsafe(no_mangle)]
 pub static _ctype_: [u8; 1] = [0];
 
@@ -516,19 +511,22 @@ unsafe fn tuh_descriptor_get_configuration_sync(
     buffer: *mut c_void,
     len: u16,
 ) -> tinyusb_sys::xfer_result_t {
-    let mut result: tinyusb_sys::xfer_result_t = tinyusb_sys::xfer_result_t::XFER_RESULT_INVALID;
-    let ok = tinyusb_sys::tuh_descriptor_get_configuration(
-        daddr,
-        config_index as _,
-        buffer,
-        len,
-        None,
-        &mut result as *mut _ as usize,
-    );
-    if !ok {
-        tinyusb_sys::xfer_result_t::XFER_RESULT_TIMEOUT
-    } else {
-        result
+    unsafe {
+        let mut result: tinyusb_sys::xfer_result_t =
+            tinyusb_sys::xfer_result_t::XFER_RESULT_INVALID;
+        let ok = tinyusb_sys::tuh_descriptor_get_configuration(
+            daddr,
+            config_index as _,
+            buffer,
+            len,
+            None,
+            &mut result as *mut _ as usize,
+        );
+        if !ok {
+            tinyusb_sys::xfer_result_t::XFER_RESULT_TIMEOUT
+        } else {
+            result
+        }
     }
 }
 
@@ -730,18 +728,18 @@ static KEYCODE2ASCII: [[u8; 2]; 128] = [
 ];
 
 fn find_key_in_report(report: &tinyusb_sys::hid_keyboard_report_t, keycode: u8) -> bool {
-    report.keycode.iter().any(|&k| k == keycode)
+    report.keycode.contains(&keycode)
 }
 
 #[allow(static_mut_refs)]
-fn process_kbd_report(dev_addr: u8, report: &tinyusb_sys::hid_keyboard_report_t) {
+fn process_kbd_report(_dev_addr: u8, report: &tinyusb_sys::hid_keyboard_report_t) {
     static mut PREV_REPORT: tinyusb_sys::hid_keyboard_report_t =
         tinyusb_sys::hid_keyboard_report_t {
             modifier: 0,
             reserved: 0,
             keycode: [0; 6],
         };
-    let mut flush = false;
+    let flush = false;
 
     for &keycode in &report.keycode {
         if keycode != 0 {
