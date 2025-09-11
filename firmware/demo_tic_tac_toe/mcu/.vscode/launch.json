@@ -1,0 +1,25 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      //"preLaunchTask": "${defaultBuildTask}",
+      "type": "probe-rs-debug",
+      "request": "launch",
+      "name": "Probe RS: Flash+Run (Debug, NoBuild)",
+      "flashingConfig": {
+        "flashingEnabled": true,
+        "formatOptions": {
+            "idf_partition_table": "partitions.csv"
+        },
+        "haltAfterReset": true
+      },
+      "chip": "ESP32S3",
+      "probe": "303a:1001:98:A3:16:EB:EE:68",
+      "coreConfigs": [
+        {
+          "programBinary": "target/xtensa-esp32s3-none-elf/release/esp32_keyboard_demo"
+        }
+      ]
+    }
+  ]
+}

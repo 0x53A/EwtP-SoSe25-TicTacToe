@@ -1,0 +1,59 @@
+[package]
+name = "esp32_tic_tac_toe"
+version = "0.1.0"
+edition = "2024"
+
+# without 'test = false', vscode shows an error
+# https://github.com/rust-lang/vscode-rust/issues/729#issuecomment-1135449424
+[[bin]]
+name = "esp32_tic_tac_toe"
+test = false
+bench = false
+
+
+[dependencies]
+embassy-executor = "0.7"
+embassy-sync = "0.7"
+embassy-time = "0.5.0"
+esp-hal = { version = "1.0.0-rc.0", features = ["esp32s3", "unstable", "rt", "psram"] }
+esp-backtrace = { version = "0.17.0", features = [
+    "esp32s3",
+    "panic-handler",
+    "exception-handler",
+    "println",
+] }
+esp-bootloader-esp-idf = "0.1.0"
+esp-println = { version = "0.15.0", features = ["esp32s3"] }
+critical-section = "1.2.0"
+embedded-graphics = "0.8.1"
+ssd1306 = "0.10.0"
+embedded-hal = "1.0.0"
+anyhow = { version = "1.0.98", default-features = false }
+heapless = "0.8.0"
+esp-alloc = "0.8.0"
+nb = "1.1.0"
+fugit = "0.3.7"
+ws2812-spi = "0.5.1"
+smart-leds-trait = "0.3.1"
+smart-leds = "0.4.0"
+microfft = "0.6.0"
+libm = "0.2.15"
+tinyusb-sys = { git = "https://github.com/0x53A/tinyusb-sys-rs", branch = "esp32s3", features = ["host", "esp32s3", "hid", "hub"] }
+embassy-usb-driver = "0.2.0"
+embassy-usb-synopsys-otg = "0.3.1"
+embassy-usb = "0.5.1"
+esp-hal-embassy = { version = "0.9.0", features = ["esp32s3"] }
+static_cell = "2.1.1"
+esp32s3 = "0.33.0"
+embassy-futures = "0.1.2"
+matlab_code = { path = "../matlab_code" }
+
+
+
+[profile.release]
+opt-level = 's'     # Optimize for size
+lto = true          # Enable Link Time Optimization
+codegen-units = 1   # Use single codegen unit for better optimization
+#strip = true        # strip symbols
+#panic = "abort"
+
