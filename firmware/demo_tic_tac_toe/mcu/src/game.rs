@@ -70,11 +70,23 @@ impl BoardState {
                 let winner = Player::from_u8(winner).unwrap();
                 GameStage::Won(winner, new_state)
             } else {
-                GameStage::InProgress(new_state)
+                if new_state.is_draw() {
+                    GameStage::Draw(new_state)
+                } else {
+                    GameStage::InProgress(new_state)
+                }
             }
         } else {
             GameStage::IllegalMove(new_state, game_move)
         }
+    }
+}
+
+impl BoardState {
+    pub fn is_draw(&self) -> bool {
+        // it's a draw if all cells are filled.
+        self.board.iter().all(|&cell| cell.is_some())
+        // (this could be optimized to declare a draw as soon as neither player could possibly win anymore.)
     }
 }
 

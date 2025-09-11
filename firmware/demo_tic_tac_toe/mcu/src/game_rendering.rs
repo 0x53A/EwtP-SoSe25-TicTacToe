@@ -40,6 +40,9 @@ mod test_xy {
     }
 }
 
+const PLAYER_1_COLOR: RGB8 = RGB8::new(0, 0, 255);
+const PLAYER_2_COLOR: RGB8 = RGB8::new(255, 0, 0);
+
 #[embassy_executor::task]
 pub async fn render_task(
     input_signal: &'static Signal<CriticalSectionRawMutex, GameStage>,
@@ -86,6 +89,7 @@ pub async fn render_task(
 
     let mut game_stage: GameStage;
     game_stage = input_signal.wait().await;
+    let mut last_changed = embassy_time::Instant::now();
 
     loop {
         let board_state = match &game_stage {
@@ -99,22 +103,11 @@ pub async fn render_task(
 
         // render board state
 
-        // highlight current player
-        if board_state.current_player == Player::PlayerOne {
-            for x in 0..MATRIX_WIDTH {
-                *xy(&mut colors, x, 0) = RGB8::new(0, 0, 255);
-            }
-        } else {
-            for x in 0..MATRIX_WIDTH {
-                *xy(&mut colors, x, 15) = RGB8::new(255, 0, 0);
-            }
-        }
-
         let mut draw_player = |player: Player, offset: (usize, usize)| {
             let (x_offset, y_offset) = offset;
             match player {
                 Player::PlayerOne => {
-                    let player_color = RGB8::new(0, 0, 255);
+                    let player_color = PLAYER_1_COLOR;
                     // draw an X
                     *xy(&mut colors, x_offset, y_offset) = player_color;
                     *xy(&mut colors, x_offset + 1, y_offset + 1) = player_color;
@@ -123,7 +116,7 @@ pub async fn render_task(
                     *xy(&mut colors, x_offset + 2, y_offset) = player_color;
                 }
                 Player::PlayerTwo => {
-                    let player_color = RGB8::new(255, 0, 0);
+                    let player_color = PLAYER_2_COLOR;
                     // draw an O
                     *xy(&mut colors, x_offset + 1, y_offset) = player_color;
                     *xy(&mut colors, x_offset, y_offset + 1) = player_color;
@@ -133,17 +126,70 @@ pub async fn render_task(
             }
         };
 
+        let cell_offset = |cell_index: usize| -> (usize, usize) {
+            let x = (cell_index % 3) * 5 + 1; // 5 pixels per cell, 1 pixel border
+            let y = (cell_index / 3) * 5 + 1;
+            (x, y)
+        };
+
         for (i, cell) in board_state.board.iter().enumerate() {
             if let Some(player) = cell {
-                let x = (i % 3) * 5 + 1; // 5 pixels per cell, 1 pixel border
-                let y = (i / 3) * 5 + 1;
+                let (x, y) = cell_offset(i);
                 draw_player(*player, (x, y));
             }
         }
 
         if let GameStage::IllegalMove(_, played_move) = game_stage {
             // highlight the illegal move
-            // todo
+            let (x, y) = cell_offset(played_move as usize - 1);
+            for dx in 0..3 {
+                for dy in 0..3 {
+                    let pixel = xy(&mut colors, x + dx, y + dy);
+                    if *pixel == RGB8::new(0, 0, 0) {
+                        // only highlight empty cells
+                        *pixel = RGB8::new(5, 0, 0);
+                    }
+                }
+            }
+        }
+
+        match game_stage {
+            GameStage::Won(winner, _) => {
+                // flash the winner's color on the border
+                let border_color = match winner {
+                    Player::PlayerOne => PLAYER_1_COLOR,
+                    Player::PlayerTwo => PLAYER_2_COLOR,
+                };
+                for x in 0..16 {
+                    *xy(&mut colors, x, 0) = border_color;
+                    *xy(&mut colors, x, 15) = border_color;
+                }
+                for y in 0..16 {
+                    *xy(&mut colors, 0, y) = border_color;
+                    *xy(&mut colors, 15, y) = border_color;
+                }
+            }
+            GameStage::Draw(_) => {
+                // gray border for draw
+                let border_color = RGB8::new(50, 50, 50);
+                for y in [0, 15] {
+                    for x in 0..16 {
+                        *xy(&mut colors, x, y) = border_color;
+                    }
+                }
+            }
+            GameStage::IllegalMove(_, _) | GameStage::InProgress(_) => {
+                // highlight current player
+                if board_state.current_player == Player::PlayerOne {
+                    for x in 0..MATRIX_WIDTH {
+                        *xy(&mut colors, x, 0) = PLAYER_1_COLOR;
+                    }
+                } else {
+                    for x in 0..MATRIX_WIDTH {
+                        *xy(&mut colors, x, 15) = PLAYER_2_COLOR;
+                    }
+                }
+            }
         }
 
         // done rendering, push it out
