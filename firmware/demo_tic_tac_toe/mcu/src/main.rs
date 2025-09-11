@@ -35,7 +35,10 @@ use static_cell::StaticCell;
 
 use esp_alloc as _;
 
-use crate::game::{GameState, Player};
+use crate::{
+    game::{BoardState, GameStage, KeyboardInput, Player},
+    game_rendering::render_task,
+};
 
 extern crate alloc;
 
@@ -97,16 +100,16 @@ async fn neopixel_task(
     let neopixel_buffer = Box::leak(Box::new([0u8; 12 * TOTAL_NEOPIXEL_LENGTH + 140]));
     let mut neopixel: NeopixelT = ws2812_spi::prerendered::Ws2812::new(spi, neopixel_buffer);
 
-    // demo
-    let mut delay = Delay::new();
-    for i in 0..256 {
-        let mut colors = [RGB8::new(0, 0, 0); MATRIX_LENGTH];
-        colors[i] = RGB8::new(255, 0, 0);
-        if let Err(e) = neopixel.write(colors) {
-            println!("Failed to write to NeoPixel: {:?}", e);
-        }
-        // delay.delay_ms(20);
-    }
+    // // demo
+    // let mut delay = Delay::new();
+    // for i in 0..256 {
+    //     let mut colors = [RGB8::new(0, 0, 0); MATRIX_LENGTH];
+    //     colors[i] = RGB8::new(255, 0, 0);
+    //     if let Err(e) = neopixel.write(colors) {
+    //         println!("Failed to write to NeoPixel: {:?}", e);
+    //     }
+    //     // delay.delay_ms(20);
+    // }
 
     loop {
         let new_state = update_signal.wait().await;
@@ -185,12 +188,41 @@ async fn _main(spawner: Spawner) -> Result<!> {
         })
         .unwrap();
 
+    static GAMESTAGE_SIGNAL: StaticCell<Signal<CriticalSectionRawMutex, GameStage>> =
+        StaticCell::new();
+    let gamestage_signal = &*GAMESTAGE_SIGNAL.init(Signal::new());
+
+    // spawn the rendering task
+    println!("Spawning rendering task...");
+    let spawn_result = spawner.spawn(render_task(gamestage_signal, neopixel_signal));
+    if let Err(e) = spawn_result {
+        println!("Failed to spawn render_task: {:?}", e);
+    }
+
     println!("Spawning interrupt count task...");
     let spawn_result = spawner.spawn(print_interrupt_count_task());
     if let Err(e) = spawn_result {
         println!("Failed to spawn print_interrupt_count_task: {:?}", e);
     }
     println!("Spawned interrupt count task");
+
+    static KEYBOARD_INPUT_SIGNAL: StaticCell<Signal<CriticalSectionRawMutex, KeyboardInput>> =
+        StaticCell::new();
+    let keyboard_input_signal: &Signal<CriticalSectionRawMutex, KeyboardInput> =
+        &*KEYBOARD_INPUT_SIGNAL.init(Signal::new());
+
+    static mut KEYBOARD_INPUT_SIGNAL_REF: Option<&Signal<CriticalSectionRawMutex, KeyboardInput>> =
+        None;
+    unsafe {
+        KEYBOARD_INPUT_SIGNAL_REF = Some(keyboard_input_signal);
+    }
+
+    println!("Spawning game logic task...");
+    let spawn_result = spawner.spawn(game::game_loop(keyboard_input_signal, gamestage_signal));
+    if let Err(e) = spawn_result {
+        println!("Failed to spawn game_logic_task: {:?}", e);
+    }
+    println!("Spawned game logic task");
 
     // This callback will be invoked for each HID report received
     tinyusb_callbacks::set_rust_hid_report_callback(Some(|dev_addr, instance, report, len| {
@@ -204,7 +236,9 @@ async fn _main(spawner: Spawner) -> Result<!> {
         if proto == tinyusb_sys::hid_interface_protocol_enum_t::HID_ITF_PROTOCOL_KEYBOARD as u8 {
             if len as usize >= core::mem::size_of::<tinyusb_sys::hid_keyboard_report_t>() {
                 let report = unsafe { &*(report as *const tinyusb_sys::hid_keyboard_report_t) };
-                process_keyboard_input(report);
+                if let Some(key) = process_keyboard_input(report) {
+                    unsafe { KEYBOARD_INPUT_SIGNAL_REF.unwrap().signal(key) };
+                }
             }
         }
     }));
@@ -224,39 +258,55 @@ async fn _main(spawner: Spawner) -> Result<!> {
     }
 }
 
-fn process_keyboard_input(report: &tinyusb_sys::hid_keyboard_report_t) -> Option<u8> {
+fn process_keyboard_input(report: &tinyusb_sys::hid_keyboard_report_t) -> Option<KeyboardInput> {
+
+    for &keycode in &report.keycode {
+        if keycode == 0 {
+            // No key pressed in this slot
+            continue;
+        }
+        println!("Keycode: {:#X}", keycode);
+    }
+
     // Check each keycode in the report
     for &keycode in &report.keycode {
-        // Map numpad keys to game positions 1-9
-        let game_position = match keycode {
+        // Map keycodes to actual keys
+        let key = match keycode {
             // Numpad keys for positions 1-9
-            0x59 => 1, // Numpad 1 -> bottom-left
-            0x5A => 2, // Numpad 2 -> bottom-middle
-            0x5B => 3, // Numpad 3 -> bottom-right
-            0x5C => 4, // Numpad 4 -> middle-left
-            0x5D => 5, // Numpad 5 -> center
-            0x5E => 6, // Numpad 6 -> middle-right
-            0x5F => 7, // Numpad 7 -> top-left
-            0x60 => 8, // Numpad 8 -> top-middle
-            0x61 => 9, // Numpad 9 -> top-right
+            0x59 => KeyboardInput::Numpad(1), // Numpad 1
+            0x5A => KeyboardInput::Numpad(2), // Numpad 2
+            0x5B => KeyboardInput::Numpad(3), // Numpad 3
+            0x5C => KeyboardInput::Numpad(4), // Numpad 4
+            0x5D => KeyboardInput::Numpad(5), // Numpad 5
+            0x5E => KeyboardInput::Numpad(6), // Numpad 6
+            0x5F => KeyboardInput::Numpad(7), // Numpad 7
+            0x60 => KeyboardInput::Numpad(8), // Numpad 8
+            0x61 => KeyboardInput::Numpad(9), // Numpad 9
 
-            // Number keys for positions 1-9 (alternative)
-            0x1E => 1, // 1 -> bottom-left
-            0x1F => 2, // 2 -> bottom-middle
-            0x20 => 3, // 3 -> bottom-right
-            0x21 => 4, // 4 -> middle-left
-            0x22 => 5, // 5 -> center
-            0x23 => 6, // 6 -> middle-right
-            0x24 => 7, // 7 -> top-left
-            0x25 => 8, // 8 -> top-middle
-            0x26 => 9, // 9 -> top-right
+            // Number keys for positions 1-9
+            0x1E => KeyboardInput::Number(1), // 1
+            0x1F => KeyboardInput::Number(2), // 2
+            0x20 => KeyboardInput::Number(3), // 3
+            0x21 => KeyboardInput::Number(4), // 4
+            0x22 => KeyboardInput::Number(5), // 5
+            0x23 => KeyboardInput::Number(6), // 6
+            0x24 => KeyboardInput::Number(7), // 7
+            0x25 => KeyboardInput::Number(8), // 8
+            0x26 => KeyboardInput::Number(9), // 9
 
-            _ => 0, // Not a valid game position
+            0x52 => KeyboardInput::ArrowUp,    // Up Arrow
+            0x51 => KeyboardInput::ArrowDown,  // Down Arrow
+            0x50 => KeyboardInput::ArrowLeft,  // Left Arrow
+            0x4F => KeyboardInput::ArrowRight, // Right Arrow
+            0x58 |
+            0x28 => KeyboardInput::Enter,      // Enter key
+
+            _ => continue, // Ignore other keys
         };
 
-        if game_position > 0 {
-            return Some(game_position);
-        }
+        println!("Key pressed: {:?}", key);
+
+        return Some(key);
     }
     return None;
 }

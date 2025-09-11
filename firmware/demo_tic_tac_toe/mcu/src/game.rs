@@ -17,21 +17,23 @@ impl Player {
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct GameState {
+#[derive(Copy, Clone, Debug)]
+pub struct BoardState {
     pub board: [Option<Player>; 9],
     pub current_player: Player,
 }
 
-pub enum MoveResult {
-    IllegalMove(GameState),
-    Won(Player, GameState),
-    Updated(GameState),
+#[derive(Copy, Clone, Debug)]
+pub enum GameStage {
+    InProgress(BoardState),
+    IllegalMove(BoardState, u8),
+    Won(Player, BoardState),
+    Draw(BoardState),
 }
 
-impl GameState {
+impl BoardState {
     pub fn new() -> Self {
-        GameState {
+        BoardState {
             board: [None; 9],
             current_player: Player::PlayerOne,
         }
@@ -46,7 +48,7 @@ impl GameState {
         result
     }
 
-    pub fn make_move(self, game_move: u8) -> MoveResult {
+    pub fn make_move(self, game_move: u8) -> GameStage {
         let TicTacToeOutput {
             was_legal,
             new_state,
@@ -58,41 +60,88 @@ impl GameState {
             proposed_move: game_move,
         });
 
-        let new_state = GameState {
-            board: new_state.map(|v| Player::from_u8(v)).to_vec().try_into().unwrap(),
+        let new_state = BoardState {
+            board: new_state
+                .map(|v| Player::from_u8(v))
+                .to_vec()
+                .try_into()
+                .unwrap(),
             current_player: Player::from_u8(next_player_turn).unwrap(),
         };
 
         if was_legal != 0 {
             if winner != 0 {
                 let winner = Player::from_u8(winner).unwrap();
-                MoveResult::Won(winner, new_state)
+                GameStage::Won(winner, new_state)
             } else {
-                MoveResult::Updated(new_state)
+                GameStage::InProgress(new_state)
             }
         } else {
-            MoveResult::IllegalMove(new_state)
+            GameStage::IllegalMove(new_state, game_move)
         }
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum KeyboardInput {
+    Numpad(u8),
+    Number(u8),
+    ArrowUp,
+    ArrowDown,
+    ArrowLeft,
+    ArrowRight,
+    Enter,
+}
+
+#[embassy_executor::task]
 pub async fn game_loop(
-    input: &'static Signal<CriticalSectionRawMutex, u8>,
-    output: &'static Signal<CriticalSectionRawMutex, GameState>,
+    input: &'static Signal<CriticalSectionRawMutex, KeyboardInput>,
+    output: &'static Signal<CriticalSectionRawMutex, GameStage>,
 ) {
     matlab_code::initialize();
 
-    let mut game_state = GameState::new();
+    let mut game_stage = GameStage::InProgress(BoardState::new());
+    output.signal(game_stage.clone());
+
     loop {
-        let game_move = input.wait().await;
-        let result = game_state.make_move(game_move);
-        match &result {
-            MoveResult::Updated(state)
-            | MoveResult::Won(_, state)
-            | MoveResult::IllegalMove(state) => {
-                game_state = state.clone();
+        let input = input.wait().await;
+
+        match &game_stage {
+            GameStage::Won(_, _) | GameStage::Draw(_) => {
+                // after a game, wait for enter to create a new game
+                if input == KeyboardInput::Enter {
+                    game_stage = GameStage::InProgress(BoardState::new());
+                    output.signal(game_stage.clone());
+                }
+                continue;
+            }
+            GameStage::InProgress(board_state) | GameStage::IllegalMove(board_state, _) => {
+                let game_move = match input {
+                    KeyboardInput::Numpad(n) if n >= 1 && n <= 9 => {
+                        // in game logic, 1 is top-left, 2 is top-middle, ..., 9 is bottom-right
+                        // in numpad, 1 is bottom-left, 2 is bottom-middle, ...,
+                        match n {
+                            1 => 7u8,
+                            2 => 8u8,
+                            3 => 9u8,
+                            4 => 4u8,
+                            5 => 5u8,
+                            6 => 6u8,
+                            7 => 1u8,
+                            8 => 2u8,
+                            9 => 3u8,
+                            _ => unreachable!(),
+                        }
+                    }
+                    _ => continue, // Ignore other keys
+                };
+
+                // make the move
+                game_stage = board_state.make_move(game_move);
+
+                // update the neopixel matrix
+                output.signal(game_stage.clone());
             }
         }
-        output.signal(game_state.clone());
     }
 }

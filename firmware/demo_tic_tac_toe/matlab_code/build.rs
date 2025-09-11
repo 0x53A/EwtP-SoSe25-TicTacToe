@@ -59,6 +59,7 @@ fn main() {
         ])
         .include(matlab_code_path)
         .include(include_path)
+        .flag_if_supported("-mlongcalls")
         .compile("tic_tac_toe");
     
     // Generate Rust bindings for the C code

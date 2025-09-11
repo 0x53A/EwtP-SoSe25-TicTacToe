@@ -69,3 +69,8 @@ cargo run --release
 ## Hardware
 
 It is expected that a 16x16 neopixel matrix is connected on pin GPIO21.
+
+
+Schematic of the dev board: https://github.com/vcc-gnd/YD-ESP32-S3/blob/main/5-public-YD-ESP32-S3-Hardware%20info/YD-ESP32-S3-SCH-V1.4.pdf
+
+You'll need to close the solder bridge at the bottom labeled "USB-OTG".
