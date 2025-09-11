@@ -4,8 +4,6 @@
  * government, commercial, or other organizational use.
  * File: rtwtypes.h
  *
- * MATLAB Coder version            : 25.1
- * C/C++ source code generated on  : 09-Sep-2025 23:57:25
  */
 
 #ifndef RTWTYPES_H

@@ -36,42 +36,27 @@ function tic_tac_toe_ui()
                else
                    src.Text = 'O'; % Display O based on player turn
                end
-               playerTurn = output.next_player_turn; % Update player turn
-               checkWinner(); % Check for a winner after the move
+               
+               % Check if there is a winner using the winner field
+               if output.winner == 1
+                   uialert(fig, 'X wins!', 'Game Over');
+                   resetGame();
+                   return;
+               elseif output.winner == 2
+                   uialert(fig, 'O wins!', 'Game Over');
+                   resetGame();
+                   return;
+               else
+                   % If no winner, continue with the next turn
+                   playerTurn = output.next_player_turn; % Update player turn
+                   % If board is full, it's a draw
+                   if all(currentState ~= 0)
+                       uialert(fig, 'It''s a draw!', 'Game Over');
+                       resetGame();
+                   end
+               end
            end
        end
-    end
-
-    % Function to check for a winner
-    function checkWinner()
-        % Convert 1D array back to 2D for win checking
-        state2D = reshape(currentState, [3, 3]);
-        
-        % Check rows, columns, and diagonals for a win
-        for i = 1:3
-            if all(state2D(i, :) == 1) || all(state2D(:, i) == 1)
-                uialert(fig, 'X wins!', 'Game Over');
-                resetGame();
-                return;
-            elseif all(state2D(i, :) == 2) || all(state2D(:, i) == 2)
-                uialert(fig, 'O wins!', 'Game Over');
-                resetGame();
-                return;
-            end
-        end
-        if all(diag(state2D) == 1) || all(diag(flipud(state2D)) == 1)
-            uialert(fig, 'X wins!', 'Game Over');
-            resetGame();
-            return;
-        elseif all(diag(state2D) == 2) || all(diag(flipud(state2D)) == 2)
-            uialert(fig, 'O wins!', 'Game Over');
-            resetGame();
-            return;
-        end
-        if all(currentState ~= 0)
-            uialert(fig, 'It''s a draw!', 'Game Over');
-            resetGame();
-        end
     end
 
     % Function to reset the game

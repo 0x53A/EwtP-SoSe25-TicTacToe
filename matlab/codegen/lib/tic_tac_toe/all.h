@@ -2,12 +2,12 @@
  * Academic License - for use in teaching, academic research, and meeting
  * course requirements at degree granting institutions only.  Not for
  * government, commercial, or other organizational use.
- * File: tic_tac_toe_terminate.h
+ * File: all.h
  *
  */
 
-#ifndef TIC_TAC_TOE_TERMINATE_H
-#define TIC_TAC_TOE_TERMINATE_H
+#ifndef ALL_H
+#define ALL_H
 
 /* Include Files */
 #include "rtwtypes.h"
@@ -19,7 +19,7 @@ extern "C" {
 #endif
 
 /* Function Declarations */
-extern void tic_tac_toe_terminate(void);
+boolean_T all(const boolean_T x[3]);
 
 #ifdef __cplusplus
 }
@@ -27,7 +27,7 @@ extern void tic_tac_toe_terminate(void);
 
 #endif
 /*
- * File trailer for tic_tac_toe_terminate.h
+ * File trailer for all.h
  *
  * [EOF]
  */

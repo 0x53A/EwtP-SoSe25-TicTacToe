@@ -4,8 +4,6 @@
  * government, commercial, or other organizational use.
  * File: tic_tac_toe_types.h
  *
- * MATLAB Coder version            : 25.1
- * C/C++ source code generated on  : 09-Sep-2025 23:57:25
  */
 
 #ifndef TIC_TAC_TOE_TYPES_H
@@ -30,6 +28,7 @@ typedef struct {
   unsigned char was_legal;
   unsigned char new_state[9];
   unsigned char next_player_turn;
+  unsigned char winner;
 } struct1_T;
 #endif /* typedef_struct1_T */
 
