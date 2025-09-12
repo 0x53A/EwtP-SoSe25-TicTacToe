@@ -39,6 +39,7 @@ smart-leds = "0.4.0"
 microfft = "0.6.0"
 libm = "0.2.15"
 tinyusb-sys = { git = "https://github.com/0x53A/tinyusb-sys-rs", branch = "esp32s3", features = ["host", "esp32s3", "hid", "hub"] }
+#tinyusb-sys = { path = "../../../tinyusb-sys-rs", features = ["host", "esp32s3", "hid", "hub"] }
 embassy-usb-driver = "0.2.0"
 embassy-usb-synopsys-otg = "0.3.1"
 embassy-usb = "0.5.1"

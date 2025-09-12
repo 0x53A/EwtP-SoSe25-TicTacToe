@@ -1,0 +1,9 @@
+{
+    // for some reason rust analyzer doesn't find projects in subfolders automatically
+    "rust-analyzer.linkedProjects": [
+        "firmware/demo_neopixel_onboard/Cargo.toml",
+        "firmware/demo_usb_keyboard/Cargo.toml",
+        "firmware/demo_tic_tac_toe/matlab_code/Cargo.toml",
+        "firmware/demo_tic_tac_toe/mcu/Cargo.toml"
+    ]
+}

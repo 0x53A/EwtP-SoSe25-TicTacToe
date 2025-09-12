@@ -79,6 +79,84 @@ async fn _main(spawner: Spawner) -> Result<!> {
     esp_hal_embassy::init([timer0, timer1]);
 
     // enable and configure USB peripheral, before initializing tinyusb
+    init_usb_phy();
+
+    let mut delay = Delay::new();
+
+    // Setup SPI for NeoPixel
+    let spi = esp_hal::spi::master::Spi::new(
+        peripherals.SPI2,
+        esp_hal::spi::master::Config::default().with_frequency(Rate::from_mhz(4)),
+    )?
+    .with_mosi(peripherals.GPIO48);
+
+    let mut neopixel: NeopixelT = ws2812_spi::Ws2812::new(spi);
+
+    let blue = smart_leds::colors::BLUE;
+    let red = smart_leds::colors::RED;
+    neopixel.write([red]).map_err(|err| anyhow!("{:?}", err))?;
+
+    for _ in 0..5 {
+        neopixel.write([red]).map_err(|err| anyhow!("{:?}", err))?;
+        delay.delay_ms(100u32);
+        neopixel.write([blue]).map_err(|err| anyhow!("{:?}", err))?;
+        delay.delay_ms(100u32);
+    }
+    
+
+    static mut NEOPIXEL: Option<&'static mut NeopixelT> = None;
+    unsafe {
+        NEOPIXEL = Some(Box::leak(Box::new(neopixel)));
+
+    // this callback will be invoked for each HID report received
+    tinyusb_callbacks::set_rust_hid_report_callback(Some(|dev_addr, instance, report, len| {
+        println!(
+            "HID report received: dev_addr={}, instance={}, report={:?}, len={}",
+            dev_addr, instance, report, len
+        );
+
+        #[allow(static_mut_refs)]
+        let neopixel = unsafe { NEOPIXEL.as_mut().unwrap() };
+
+        static mut I: u32 = 0;
+        let i = unsafe {
+            I += 1;
+            I
+        };
+
+        neopixel
+            .write([if i % 2 == 0 {
+                smart_leds::colors::GREEN
+            } else {
+                smart_leds::colors::RED
+            }])
+            .unwrap();
+    }));
+
+    // Initialize tinyusb host stack
+    println!("initializing tinyusb ...");
+    init_tinyusb();
+    println!("tinyusb initialized");
+    }
+
+
+    println!("Spawning interrupt count task ...");
+    let spawn_result = spawner.spawn(print_interrupt_count_task());
+    if let Err(e) = spawn_result {
+        println!("Failed to spawn print_interrupt_count_task: {:?}", e);
+    }
+    println!("Spawned interrupt count task");
+
+    // main loop, run both tinyusb and our own tasks
+    loop {
+        unsafe {
+            tinyusb_sys::tuh_task_ext(u32::MAX, false);
+        }
+        embassy_futures::yield_now().await;
+    }
+}
+
+fn init_usb_phy() {
     unsafe {
         let system = esp32s3::SYSTEM::steal();
         // enable clock
@@ -186,80 +264,6 @@ async fn _main(spawner: Spawner) -> Result<!> {
             w.sel().set_bit();
             w
         });
-    }
-
-    let mut delay = Delay::new();
-
-    // Setup SPI for NeoPixel
-    let spi = esp_hal::spi::master::Spi::new(
-        peripherals.SPI2,
-        esp_hal::spi::master::Config::default().with_frequency(Rate::from_mhz(4)),
-    )?
-    .with_mosi(peripherals.GPIO48);
-
-    let mut neopixel: NeopixelT = ws2812_spi::Ws2812::new(spi);
-
-    let blue = smart_leds::colors::BLUE;
-    let red = smart_leds::colors::RED;
-    neopixel.write([red]).map_err(|err| anyhow!("{:?}", err))?;
-
-    for _ in 0..5 {
-        neopixel.write([red]).map_err(|err| anyhow!("{:?}", err))?;
-        delay.delay_ms(100u32);
-        neopixel.write([blue]).map_err(|err| anyhow!("{:?}", err))?;
-        delay.delay_ms(100u32);
-    }
-    
-
-    static mut NEOPIXEL: Option<&'static mut NeopixelT> = None;
-    unsafe {
-        NEOPIXEL = Some(Box::leak(Box::new(neopixel)));
-
-    // this callback will be invoked for each HID report received
-    tinyusb_callbacks::set_rust_hid_report_callback(Some(|dev_addr, instance, report, len| {
-        println!(
-            "HID report received: dev_addr={}, instance={}, report={:?}, len={}",
-            dev_addr, instance, report, len
-        );
-
-        #[allow(static_mut_refs)]
-        let neopixel = unsafe { NEOPIXEL.as_mut().unwrap() };
-
-        static mut I: u32 = 0;
-        let i = unsafe {
-            I += 1;
-            I
-        };
-
-        neopixel
-            .write([if i % 2 == 0 {
-                smart_leds::colors::GREEN
-            } else {
-                smart_leds::colors::RED
-            }])
-            .unwrap();
-    }));
-
-    // Initialize tinyusb host stack
-    println!("initializing tinyusb ...");
-    init_tinyusb();
-    println!("tinyusb initialized");
-    }
-
-
-    println!("Spawning interrupt count task ...");
-    let spawn_result = spawner.spawn(print_interrupt_count_task());
-    if let Err(e) = spawn_result {
-        println!("Failed to spawn print_interrupt_count_task: {:?}", e);
-    }
-    println!("Spawned interrupt count task");
-
-    // main loop, run both tinyusb and our own tasks
-    loop {
-        unsafe {
-            tinyusb_sys::tuh_task_ext(u32::MAX, false);
-        }
-        embassy_futures::yield_now().await;
     }
 }
 

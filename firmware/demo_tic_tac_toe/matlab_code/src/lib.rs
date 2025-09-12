@@ -1,7 +1,6 @@
 //! Rust bindings for MATLAB generated TicTacToe code
 #![no_std]
 
-
 // Include the generated bindings
 #[allow(non_upper_case_globals)]
 #[allow(non_camel_case_types)]
@@ -10,7 +9,6 @@
 mod bindings {
     include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 }
-
 
 // Safe Rust wrapper functions
 use core::mem::MaybeUninit;
@@ -40,13 +38,10 @@ pub type TicTacToeOutput = bindings::struct1_T;
 /// * Whether the move was legal
 /// * The new state of the board
 /// * The next player's turn
-pub fn make_move(
-    input: TicTacToeInput,
-) -> TicTacToeOutput {
-    
+pub fn make_move(input: TicTacToeInput) -> TicTacToeOutput {
     // Create output structure
     let mut output = MaybeUninit::<TicTacToeOutput>::uninit();
-    
+
     // Call the MATLAB generated function
     unsafe {
         bindings::tic_tac_toe(&input, output.as_mut_ptr());
@@ -63,21 +58,30 @@ mod tests {
     fn test_make_move() {
         // Initialize the library
         initialize();
-        
+
         // Create an empty board
         let current_state = [0u8; 9];
         let player_turn = 1; // Player 1's turn
         let proposed_move = 5; // Center position (1-indexed in MATLAB, so 5 is the center)
-        
+
         // Make the move
-        let TicTacToeOutput{was_legal, new_state, next_player_turn, winner} = make_move(TicTacToeInput{current_state, player_turn, proposed_move});
+        let TicTacToeOutput {
+            was_legal,
+            new_state,
+            next_player_turn,
+            winner,
+        } = make_move(TicTacToeInput {
+            current_state,
+            player_turn,
+            proposed_move,
+        });
 
         // Check that the move was legal
         assert!(was_legal != 0);
 
         // Check that the board was updated correctly - convert to 0-indexed for checking array
         assert_eq!(new_state[(proposed_move - 1) as usize], player_turn);
-        
+
         // Check that the player turn was switched
         assert_eq!(next_player_turn, 2);
 
