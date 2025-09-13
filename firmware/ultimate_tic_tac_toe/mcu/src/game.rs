@@ -1,5 +1,5 @@
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, signal::Signal};
-use matlab_code::{UltimateInput, UltimateOutput, run_ultimate, initialize};
+use matlab_code::{UltimateInput, UltimateOutput, initialize, run_ultimate};
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Player {
@@ -25,7 +25,10 @@ impl Player {
 
 #[derive(Copy, Clone, Debug)]
 pub struct BoardState {
+    /// first index is sub-grid, second index is cell within sub-grid.
+    /// Both are in row-major order
     pub board: [[Option<Player>; 9]; 9],
+    /// Row Major order (top-left, top-center, ...)
     pub finished_grids: [Option<PlayerOrDraw>; 9],
     pub current_player: Player,
 }
@@ -36,7 +39,7 @@ pub enum NextUserSelection {
     /// the user must first select a mini-grid (1..9)
     SelectGrid,
     /// a mini-grid is selected, user must select a cell (1..9)
-    SelectCell(/*grid*/u8),
+    SelectCell(/*grid*/ u8),
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -49,7 +52,11 @@ pub struct Move {
 pub enum GameStage {
     InProgress(BoardState, NextUserSelection),
     /// same as InProgress, but the last move was illegal
-    IllegalMove(BoardState, NextUserSelection, /*previous_move_attempt*/Move),
+    IllegalMove(
+        BoardState,
+        NextUserSelection,
+        /*previous_move_attempt*/ Move,
+    ),
     Won(Player, BoardState),
     Draw(BoardState),
 }
@@ -69,10 +76,22 @@ impl BoardState {
         // expects the 9x9 array flattened such that element (r,c) maps to
         // index = r + c*9 where r and c are 0-based.
         let mut result = [0u8; 81];
-        for r in 0..9 {
-            for c in 0..9 {
-                let flat = r + c * 9;
-                result[flat] = self.board[r][c].map(|p| p as u8).unwrap_or(0);
+        for i_grid in 0..9 {
+            for i_cell in 0..9 {
+                // internal layout: i_grid = 0..8 (sub-grid in row-major), i_cell = 0..8 (cell in row-major)
+                // We need to convert to a full 9x9 row/col and then to MATLAB column-major flattening
+                // Compute big-grid row/col (0..2)
+                let grid_row = i_grid / 3;
+                let grid_col = i_grid % 3;
+                // cell row/col within big-grid (0..2)
+                let cell_row = i_cell / 3;
+                let cell_col = i_cell % 3;
+                // absolute row/col in 9x9 (0-based)
+                let row = grid_row * 3 + cell_row;
+                let col = grid_col * 3 + cell_col;
+                // MATLAB column-major index: idx = row + col*9
+                let flat = (row + col * 9) as usize;
+                result[flat] = self.board[i_grid][i_cell].map(|p| p as u8).unwrap_or(0);
             }
         }
         result
@@ -82,15 +101,18 @@ impl BoardState {
         // Prepare input for MATLAB generated function
         // Build current_grid_winners from our finished_grids in column-major order
         let mut cg_winners = [0u8; 9];
-        for r in 0..3 {
-            for c in 0..3 {
-                let idx = r + c * 3; // column-major
-                cg_winners[idx] = match self.finished_grids[idx] {
-                    None => 0u8,
-                    Some(PlayerOrDraw::Player(p)) => p as u8,
-                    Some(PlayerOrDraw::Draw) => 3u8,
-                };
-            }
+        for i in 0..9 {
+            // internal finished_grids is indexed in row-major sub-grid order (0..8)
+            // Convert to 3x3 row/col (0-based)
+            let grid_row = i / 3;
+            let grid_col = i % 3;
+            // MATLAB expects column-major ordering for the 3x3 array: idx = row + col*3
+            let matlab_idx = (grid_row + grid_col * 3) as usize;
+            cg_winners[matlab_idx] = match self.finished_grids[i] {
+                None => 0u8,
+                Some(PlayerOrDraw::Player(p)) => p as u8,
+                Some(PlayerOrDraw::Draw) => 3u8,
+            };
         }
 
         let input = UltimateInput {
@@ -112,26 +134,35 @@ impl BoardState {
 
         // Map new_grid_state (column-major flattened 81 bytes) back into BoardState.board
         let mut new_board = [[None; 9]; 9];
-        for r in 0..9 {
-            for c in 0..9 {
-                let flat = r + c * 9;
-                new_board[r][c] = Player::from_u8(new_grid_state[flat]);
+        for i_grid in 0..9 {
+            for i_cell in 0..9 {
+                // inverse of board_as_u8_array: compute absolute row/col in 0-based
+                let grid_row = i_grid / 3;
+                let grid_col = i_grid % 3;
+                let cell_row = i_cell / 3;
+                let cell_col = i_cell % 3;
+                let row = grid_row * 3 + cell_row;
+                let col = grid_col * 3 + cell_col;
+                let flat = (row + col * 9) as usize; // MATLAB column-major
+                new_board[i_grid][i_cell] = Player::from_u8(new_grid_state[flat]);
             }
         }
 
         // Map new_grid_winners (3x3 column-major) back into finished_grids
         let mut new_finished = [None; 9];
-        for r in 0..3 {
-            for c in 0..3 {
-                let idx = r + c * 3; // column-major index
-                new_finished[idx] = match new_grid_winners[idx] {
-                    0 => None,
-                    1 => Some(PlayerOrDraw::Player(Player::PlayerOne)),
-                    2 => Some(PlayerOrDraw::Player(Player::PlayerTwo)),
-                    3 => Some(PlayerOrDraw::Draw),
-                    _ => None,
-                };
-            }
+        for i in 0..9 {
+            // internal i is row-major 0..8 -> (row,col)
+            let grid_row = i / 3;
+            let grid_col = i % 3;
+            // MATLAB 3x3 column-major index
+            let matlab_idx = (grid_row + grid_col * 3) as usize;
+            new_finished[i] = match new_grid_winners[matlab_idx] {
+                0 => None,
+                1 => Some(PlayerOrDraw::Player(Player::PlayerOne)),
+                2 => Some(PlayerOrDraw::Player(Player::PlayerTwo)),
+                3 => Some(PlayerOrDraw::Draw),
+                _ => None,
+            };
         }
 
         let next_selection = if next_grid == 0 {
@@ -156,23 +187,35 @@ impl BoardState {
                 GameStage::InProgress(new_state, next_selection)
             }
         } else {
-            GameStage::IllegalMove(new_state, next_selection, Move { grid: proposed_grid, cell: proposed_cell })
+            GameStage::IllegalMove(
+                new_state,
+                next_selection,
+                Move {
+                    grid: proposed_grid,
+                    cell: proposed_cell,
+                },
+            )
         }
     }
 }
 
 impl BoardState {
     pub fn is_draw(&self) -> bool {
-        // it's a draw if all 81 cells are filled
-        for r in 0..9 {
-            for c in 0..9 {
-                if self.board[r][c].is_none() {
+        // it's a draw if all 81 cells are filled, or all sub grids are finished
+        for i_board in 0..9 {
+            for i_cell in 0..9 {
+                if self.board[i_board][i_cell].is_none() {
                     return false;
                 }
             }
         }
+        // Check if all sub-grids are finished
+        for i in 0..9 {
+            if self.finished_grids[i].is_none() {
+                return false;
+            }
+        }
         true
-        // (this could be optimized to declare a draw earlier.)
     }
 }
 
@@ -206,12 +249,14 @@ pub async fn game_loop(
             GameStage::Won(_, _) | GameStage::Draw(_) => {
                 // after a game, wait for enter to create a new game
                 if input == KeyboardInput::Enter {
-                    game_stage = GameStage::InProgress(BoardState::new(), NextUserSelection::SelectCell(1));
+                    game_stage =
+                        GameStage::InProgress(BoardState::new(), NextUserSelection::SelectCell(1));
                     output.signal(game_stage);
                 }
                 continue;
             }
-            GameStage::InProgress(board_state, selection) | GameStage::IllegalMove(board_state, selection, _) => {
+            GameStage::InProgress(board_state, selection)
+            | GameStage::IllegalMove(board_state, selection, _) => {
                 match input {
                     KeyboardInput::Numpad(n) if (1..=9).contains(&n) => {
                         // Map numpad numbering to row-major 1..9 ordering used in MATLAB
@@ -228,11 +273,13 @@ pub async fn game_loop(
                             _ => unreachable!(),
                         };
 
-
                         match selection {
                             NextUserSelection::SelectGrid => {
                                 // first press selects the mini-grid (1..9)
-                                game_stage = GameStage::InProgress(*board_state, NextUserSelection::SelectCell(mapped));
+                                game_stage = GameStage::InProgress(
+                                    *board_state,
+                                    NextUserSelection::SelectCell(mapped),
+                                );
                                 output.signal(game_stage);
                             }
                             NextUserSelection::SelectCell(grid) => {

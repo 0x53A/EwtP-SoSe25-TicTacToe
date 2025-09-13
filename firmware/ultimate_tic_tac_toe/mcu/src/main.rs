@@ -54,7 +54,6 @@ const MATRIX_HEIGHT: usize = 16; // 3x3 grid plus borders
 const MATRIX_LENGTH: usize = MATRIX_WIDTH * MATRIX_HEIGHT;
 const TOTAL_NEOPIXEL_LENGTH: usize = MATRIX_LENGTH;
 
-
 type NeopixelT<'a> = ws2812_spi::prerendered::Ws2812<
     'static,
     esp_hal::spi::master::SpiDmaBus<'a, esp_hal::Blocking>,

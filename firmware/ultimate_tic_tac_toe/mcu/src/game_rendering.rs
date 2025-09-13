@@ -40,8 +40,13 @@ mod test_xy {
     }
 }
 
-const PLAYER_1_COLOR: RGB8 = RGB8::new(0, 0, 255);
-const PLAYER_2_COLOR: RGB8 = RGB8::new(255, 0, 0);
+// Player colors
+const PLAYER_1_COLOR: RGB8 = RGB8::new(0, 100, 0);
+const PLAYER_2_COLOR: RGB8 = RGB8::new(0, 0, 100);
+
+const ERROR_GLOW: RGB8 = RGB8::new(10, 0, 0); // red glow for illegal move
+
+const CURRENT_GRID_GLOW: RGB8 = RGB8::new(5, 0, 5); // glow for current grid selection
 
 #[embassy_executor::task]
 pub async fn render_task(
@@ -103,53 +108,23 @@ pub async fn render_task(
 
         // render board state
 
-        let mut draw_player = |player: Player, offset: (usize, usize)| {
-            let (x_offset, y_offset) = offset;
-            match player {
-                Player::PlayerOne => {
-                    let player_color = PLAYER_1_COLOR;
-                    // draw an X
-                    *xy(&mut colors, x_offset, y_offset) = player_color;
-                    *xy(&mut colors, x_offset + 1, y_offset + 1) = player_color;
-                    *xy(&mut colors, x_offset + 2, y_offset + 2) = player_color;
-                    *xy(&mut colors, x_offset, y_offset + 2) = player_color;
-                    *xy(&mut colors, x_offset + 2, y_offset) = player_color;
-                }
-                Player::PlayerTwo => {
-                    let player_color = PLAYER_2_COLOR;
-                    // draw an O
-                    *xy(&mut colors, x_offset + 1, y_offset) = player_color;
-                    *xy(&mut colors, x_offset, y_offset + 1) = player_color;
-                    *xy(&mut colors, x_offset + 2, y_offset + 1) = player_color;
-                    *xy(&mut colors, x_offset + 1, y_offset + 2) = player_color;
-                }
-            }
-        };
-
-        // For ultimate Tic-Tac-Toe we have a 9x9 board. We'll render one pixel per cell
-        // into the 16x16 matrix. The layout uses 3x3 blocks for the big boards (3 big
-        // boards per row/column) with 2-pixel borders between those big boards.
-        // Mapping chosen (leftmost content starts at x=1) so that big-blocks are at
-        // x = 1..3, 6..8, 11..13 and borders at x=4..5 and 9..10, leaving rightmost
-        // padding columns 14..15. This fits into 0..15 indexes on the 16x16 display.
+        /// 0 based indizes
         let cell_offset = |board_idx: usize, cell_idx: usize| -> (usize, usize) {
-            // board_idx: 0..8 (3x3 big boards row-major)
-            // cell_idx: 0..8 (3x3 cells inside a big board row-major)
-            let big_row = board_idx / 3;
-            let big_col = board_idx % 3;
+            let board_column = board_idx % 3;
+            let board_row = board_idx / 3;
 
-            let inner_row = cell_idx / 3;
-            let inner_col = cell_idx % 3;
+            let x_grid = 1 + board_column * 5;
+            let y_grid = 1 + board_row * 5;
 
-            // For each big_col allocate 3 pixels for cells and 2 pixels for border.
-            // Use an initial offset of 1 pixel on the left.
-            let x = 1 + big_col * 5 + inner_col;
-            let y = 1 + big_row * 5 + inner_row;
+            let cell_x = cell_idx % 3;
+            let cell_y = cell_idx / 3;
+
+            let x = x_grid + cell_x;
+            let y = y_grid + cell_y;
             (x, y)
         };
 
         // Compute selection glow and selection state
-        let glow = RGB8::new(0, 5, 5);
         let selection = match game_stage {
             GameStage::InProgress(_, sel) => Some(sel),
             GameStage::IllegalMove(_, sel, _) => Some(sel),
@@ -157,59 +132,109 @@ pub async fn render_task(
         };
 
         // Draw occupied cells (one pixel per cell)
-        for r in 0..9 {
-            for c in 0..9 {
-                if let Some(player) = board_state.board[r][c] {
-                    let board_idx = (r / 3) * 3 + (c / 3);
-                    let cell_idx = (r % 3) * 3 + (c % 3);
-                    let (x, y) = cell_offset(board_idx, cell_idx);
-                    if x < MATRIX_WIDTH && y < MATRIX_WIDTH {
-                        *xy(&mut colors, x, y) = match player {
-                            Player::PlayerOne => PLAYER_1_COLOR,
-                            Player::PlayerTwo => PLAYER_2_COLOR,
-                        };
-                    }
+        for i_board in 0..9 {
+            for i_cell in 0..9 {
+                if let Some(player) = board_state.board[i_board][i_cell] {
+                    let (x, y) = cell_offset(i_board, i_cell);
+
+                    *xy(&mut colors, x, y) = match player {
+                        Player::PlayerOne => PLAYER_1_COLOR,
+                        Player::PlayerTwo => PLAYER_2_COLOR,
+                    };
                 }
             }
         }
+
+        let board_glow_amount: u8 = 10;
+        for i_board in 0..9 {
+            if let Some(finished) = board_state.finished_grids[i_board] {
+                // compute winner color or white for draw
+                let winner_color = match finished {
+                    crate::game::PlayerOrDraw::Player(p) => match p {
+                        Player::PlayerOne => PLAYER_1_COLOR,
+                        Player::PlayerTwo => PLAYER_2_COLOR,
+                    },
+                    crate::game::PlayerOrDraw::Draw => RGB8::new(255, 255, 255),
+                };
+
+                let glow_color = RGB8::new(
+                    (winner_color.r as u16 * board_glow_amount as u16 / 255) as u8,
+                    (winner_color.g as u16 * board_glow_amount as u16 / 255) as u8,
+                    (winner_color.b as u16 * board_glow_amount as u16 / 255) as u8,
+                );
+
+                for i_cell in 0..9 {
+                    if board_state.board[i_board][i_cell].is_none() {
+                        let (x, y) = cell_offset(i_board, i_cell);
+
+                        let pixel = xy(&mut colors, x, y);
+                        // add glow by mixing a small amount of glow_color into the pixel
+                        *pixel = glow_color;
+                    }
+                }
+
+                let (left, top) = cell_offset(i_board, 0);
+                let (right, bottom) = cell_offset(i_board, 8);
+
+                for x in left - 1..right + 2 {
+                    *xy(&mut colors, x, top - 1) = glow_color;
+                    *xy(&mut colors, x, bottom + 1) = glow_color;
+                }
+
+                for y in top - 1..bottom + 2 {
+                    *xy(&mut colors, left - 1, y) = glow_color;
+                    *xy(&mut colors, right + 1, y) = glow_color;
+                }
+            }
+        }
+
+        let glow_pulse: RGB8 = {
+            let elapsed = (embassy_time::Instant::now() - last_changed).as_millis() as f32 / 1000.0;
+            let omega = 2.0 * core::f32::consts::PI * 1.0; // 1 Hz pulse
+            let env = (1.0 + libm::cosf(omega * elapsed)) * 0.5;
+            RGB8::new(
+                (CURRENT_GRID_GLOW.r as f32 * env) as u8,
+                (CURRENT_GRID_GLOW.g as f32 * env) as u8,
+                (CURRENT_GRID_GLOW.b as f32 * env) as u8,
+            )
+        };
 
         // Apply selection glow: if SelectGrid => all empty cells glow; if SelectCell(grid)
         // => only empty cells inside that big-grid glow. Do not glow border pixels.
         if let Some(sel) = selection {
             match sel {
                 crate::game::NextUserSelection::SelectGrid => {
-                    for r in 0..9 {
-                        for c in 0..9 {
-                            if board_state.board[r][c].is_none() {
-                                        let board_idx = (r / 3) * 3 + (c / 3);
-                                        let cell_idx = (r % 3) * 3 + (c % 3);
-                                        let (x, y) = cell_offset(board_idx, cell_idx);
-                                if x < MATRIX_WIDTH && y < MATRIX_WIDTH {
-                                    let pixel = xy(&mut colors, x, y);
-                                    *pixel = RGB8::new(pixel.r, pixel.g.saturating_add(glow.g), pixel.b.saturating_add(glow.b));
-                                }
+                    for i_board in 0..9 {
+                        if board_state.finished_grids[i_board].is_some() {
+                            // skip finished big-grids
+                            continue;
+                        }
+                        for i_cell in 0..9 {
+                            if board_state.board[i_board][i_cell].is_none() {
+                                let (x, y) = cell_offset(i_board, i_cell);
+
+                                let pixel = xy(&mut colors, x, y);
+                                *pixel = RGB8::new(
+                                    pixel.r.saturating_add(glow_pulse.r),
+                                    pixel.g.saturating_add(glow_pulse.g),
+                                    pixel.b.saturating_add(glow_pulse.b),
+                                );
                             }
                         }
                     }
                 }
                 crate::game::NextUserSelection::SelectCell(grid) => {
-                    // grid is 1..9 in row-major order for the 3x3 big boards
-                    let grid0 = (grid - 1) as usize;
-                    let big_row = grid0 / 3;
-                    let big_col = grid0 % 3;
-                    for inner_r in 0..3 {
-                        for inner_c in 0..3 {
-                            let r = big_row * 3 + inner_r;
-                            let c = big_col * 3 + inner_c;
-                                if board_state.board[r][c].is_none() {
-                                let board_idx = (r / 3) * 3 + (c / 3);
-                                let cell_idx = (r % 3) * 3 + (c % 3);
-                                let (x, y) = cell_offset(board_idx, cell_idx);
-                                if x < MATRIX_WIDTH && y < MATRIX_WIDTH {
-                                    let pixel = xy(&mut colors, x, y);
-                                    *pixel = RGB8::new(pixel.r, pixel.g.saturating_add(glow.g), pixel.b.saturating_add(glow.b));
-                                }
-                            }
+                    let i_grid: usize = (grid - 1) as usize;
+                    for i_cell in 0..9 {
+                        if board_state.board[i_grid][i_cell].is_none() {
+                            let (x, y) = cell_offset(i_grid, i_cell);
+
+                            let pixel = xy(&mut colors, x, y);
+                            *pixel = RGB8::new(
+                                pixel.r.saturating_add(glow_pulse.r),
+                                pixel.g.saturating_add(glow_pulse.g),
+                                pixel.b.saturating_add(glow_pulse.b),
+                            );
                         }
                     }
                 }
@@ -217,14 +242,26 @@ pub async fn render_task(
         }
 
         if let GameStage::IllegalMove(_, _, played_move) = game_stage {
-            // highlight the illegal move: compute absolute r,c from grid and cell
-            let grid0 = (played_move.grid - 1) as usize; // 0..8
-            let cell0 = (played_move.cell - 1) as usize; // 0..8
-            let (x, y) = cell_offset(grid0, cell0);
-            if x < MATRIX_WIDTH && y < MATRIX_WIDTH {
-                let pixel = xy(&mut colors, x, y);
-                *pixel = RGB8::new(pixel.r, pixel.g.saturating_add(5), pixel.b);
-            }
+            let (x, y) = cell_offset(
+                (played_move.grid - 1) as usize,
+                (played_move.cell - 1) as usize,
+            );
+            // compute a pulsing glow effect
+            let pixel = xy(&mut colors, x, y);
+            let elapsed = (embassy_time::Instant::now() - last_changed).as_millis() as f32 / 1000.0;
+            let omega = 2.0 * core::f32::consts::PI * 2.0;
+            let env = (1.0 + libm::cosf(omega * elapsed)) * 0.5;
+            let blend_channel = |a: u8, b: u8, env: f32| -> u8 {
+                let af = (a as f32) * env;
+                let bf = (b as f32) * (1.0 - env);
+                let sum = af + bf;
+                if sum >= 255.0 { 255u8 } else { sum as u8 }
+            };
+            let new_r = blend_channel(ERROR_GLOW.r, pixel.r, env);
+            let new_g = blend_channel(ERROR_GLOW.g, pixel.g, env);
+            let new_b = blend_channel(ERROR_GLOW.b, pixel.b, env);
+
+            *pixel = RGB8::new(new_r, new_g, new_b);
         }
 
         match game_stage {
@@ -272,6 +309,7 @@ pub async fn render_task(
         ticker.next().await;
         if let Some(new_data) = input_signal.try_take() {
             game_stage = new_data;
+            last_changed = embassy_time::Instant::now();
         }
     }
 }
