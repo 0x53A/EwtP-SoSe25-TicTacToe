@@ -81,6 +81,10 @@ end
 if output.new_grid_state(abs_r, abs_c) ~= 0
     output.was_legal = uint8(0);
     output.next_player_turn = input.player_turn;
+    % If the move was illegal because the cell is occupied, the player
+    % must still play in the same mini-grid. Enforce that by setting
+    % next_grid to the proposed mini-grid number.
+    output.next_grid = input.proposed_move_grid;
     return;
 end
 

@@ -106,6 +106,10 @@ void ultimate_tic_tac_toe_logic(const struct0_T *input, struct1_T *output)
       if (input->current_grid_state[endR] != 0) {
         output->was_legal = 0U;
         output->next_player_turn = input->player_turn;
+        /*  If the move was illegal because the cell is occupied, the player */
+        /*  must still play in the same mini-grid. Enforce that by setting */
+        /*  next_grid to the proposed mini-grid number. */
+        output->next_grid = input->proposed_move_grid;
       } else {
         int exitg1;
         int exitg2;

@@ -23,16 +23,16 @@ jobs:
           espup install
 
       - name: Build project 'demo neopixel_onboard'
-        workdir: ./firmware/demo_neopixel_onboard
+        working-directory: ./firmware/demo_neopixel_onboard
         run: |
           cargo build --release
 
       - name: Build project 'demo tic tac toe'
-        workdir: ./firmware/demo_tic_tac_toe
+        working-directory: ./firmware/demo_tic_tac_toe
         run: |
           cargo build --release
 
       - name: Build project 'demo usb keyboard'
-        workdir: ./firmware/demo_usb_keyboard
+        working-directory: ./firmware/demo_usb_keyboard
         run: |
           cargo build --release
