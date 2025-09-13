@@ -41,8 +41,8 @@ mod test_xy {
 }
 
 // Player colors
-const PLAYER_1_COLOR: RGB8 = RGB8::new(0, 100, 0);
-const PLAYER_2_COLOR: RGB8 = RGB8::new(0, 0, 100);
+const PLAYER_1_COLOR: RGB8 = RGB8::new(0, 80, 0);
+const PLAYER_2_COLOR: RGB8 = RGB8::new(0, 0, 80);
 
 const ERROR_GLOW: RGB8 = RGB8::new(10, 0, 0); // red glow for illegal move
 
