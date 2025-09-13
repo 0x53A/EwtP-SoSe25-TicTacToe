@@ -1,3 +1,7 @@
 /codegen/lib/tic_tac_toe/*
 !/codegen/lib/tic_tac_toe/*.c
 !/codegen/lib/tic_tac_toe/*.h
+
+/codegen/lib/ultimate_tic_tac_toe_logic/*
+!/codegen/lib/ultimate_tic_tac_toe_logic/*.c
+!/codegen/lib/ultimate_tic_tac_toe_logic/*.h

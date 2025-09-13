@@ -54,7 +54,7 @@ const MATRIX_HEIGHT: usize = 16; // 3x3 grid plus borders
 const MATRIX_LENGTH: usize = MATRIX_WIDTH * MATRIX_HEIGHT;
 const TOTAL_NEOPIXEL_LENGTH: usize = MATRIX_LENGTH;
 
-// Prerendered version of the NeoPixel driver for better performance
+
 type NeopixelT<'a> = ws2812_spi::prerendered::Ws2812<
     'static,
     esp_hal::spi::master::SpiDmaBus<'a, esp_hal::Blocking>,
@@ -405,10 +405,7 @@ fn setup_usb_peripheral() {
 
 /// Initialize tinyusb as a host on root port 0
 fn init_tinyusb() {
-    // Build the C struct for initialization. Field names/types come from tinyusb_sys bindings.
-    // Use unsafe since we call into C.
     unsafe {
-        // Prepare a default-initialized struct and set fields we need.
         let mut rh_init: tinyusb_sys::tusb_rhport_init_t = core::mem::zeroed();
 
         // role = HOST

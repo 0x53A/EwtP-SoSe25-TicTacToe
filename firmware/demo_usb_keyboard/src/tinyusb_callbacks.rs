@@ -3,13 +3,10 @@ use core::ffi::c_void;
 use core::sync::atomic::AtomicBool;
 use core::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 
-use esp_hal::interrupt::CpuInterrupt;
 use esp_hal::interrupt::Priority;
 use esp_hal::system::Cpu;
 use esp_println::{print, println};
 use esp32s3::Interrupt;
-use esp32s3::usb0::GINTSTS;
-use esp32s3::usb0::gintsts::GINTSTS_SPEC;
 
 // store the registered handler and arg so the trampoline can forward the interrupt
 static TUSB_HANDLER: AtomicUsize = AtomicUsize::new(0);
@@ -19,18 +16,19 @@ static TUSB_BOUND: AtomicBool = AtomicBool::new(false);
 
 pub static INTERRUPT_COUNTER: AtomicU32 = AtomicU32::new(0);
 
-
 pub unsafe extern "C" fn interrupt_trampoline() {
-    INTERRUPT_COUNTER.fetch_add(1, Ordering::SeqCst);
+    unsafe {
+        INTERRUPT_COUNTER.fetch_add(1, Ordering::SeqCst);
 
-    // forward to saved handler
-    let h = TUSB_HANDLER.load(Ordering::SeqCst);
-    if h == 0 {
-        return;
+        // forward to saved handler
+        let h = TUSB_HANDLER.load(Ordering::SeqCst);
+        if h == 0 {
+            return;
+        }
+        let arg = TUSB_HANDLER_ARG.load(Ordering::SeqCst) as *mut c_void;
+        let handler: extern "C" fn(*mut c_void) = core::mem::transmute(h);
+        handler(arg);
     }
-    let arg = TUSB_HANDLER_ARG.load(Ordering::SeqCst) as *mut c_void;
-    let handler: extern "C" fn(*mut c_void) = core::mem::transmute(h);
-    handler(arg);
 }
 
 #[unsafe(no_mangle)]
@@ -57,7 +55,7 @@ pub extern "C" fn tusb_esp32_int_enable(
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn tusb_esp32_int_disable(irq_num: u32) {
+pub extern "C" fn tusb_esp32_int_disable(_irq_num: u32) {
     esp_hal::interrupt::disable(Cpu::ProCpu, Interrupt::USB);
 }
 
@@ -121,11 +119,7 @@ extern "C" fn tuh_mount_cb(daddr: u8) {
                 "Got descriptor: Device {}: ID {:04x}:{:04x}",
                 daddr, vendor, product
             );
-            for inst in 0..2 {
-                unsafe {
-                    tinyusb_sys::tuh_hid_receive_report(daddr, inst);
-                }
-            }
+            tinyusb_sys::tuh_hid_receive_report(daddr, 0);
         } else {
             println!("Failed to get device descriptor for addr {}", daddr);
         }
@@ -242,42 +236,28 @@ pub extern "C" fn tuh_hid_report_received_cb(
 }
 
 unsafe fn cstr_to_str(ptr: *const c_char) -> &'static str {
-    if ptr.is_null() {
-        return "";
-    }
-    let mut len = 0usize;
-    // find NUL terminator
-    loop {
-        if *ptr.add(len) == 0 {
-            break;
+    unsafe {
+        if ptr.is_null() {
+            return "";
         }
-        len += 1;
+        let mut len = 0usize;
+        // find NUL terminator
+        loop {
+            if *ptr.add(len) == 0 {
+                break;
+            }
+            len += 1;
+        }
+        let slice = core::slice::from_raw_parts(ptr as *const u8, len);
+        core::str::from_utf8_unchecked(slice)
     }
-    let slice = core::slice::from_raw_parts(ptr as *const u8, len);
-    core::str::from_utf8_unchecked(slice)
-}
-
-// Helper: read n usize-sized words from args pointer and assemble into u64 (little-endian)
-fn read_u64_from_words(words: &[usize]) -> u64 {
-    let mut v: u64 = 0;
-    let word_bytes = core::mem::size_of::<usize>();
-    // little-endian target assumed
-    for (i, &w) in words
-        .iter()
-        .enumerate()
-        .take((8 + word_bytes - 1) / word_bytes)
-    {
-        let shift = (i * word_bytes) * 8;
-        v |= (w as u64) << shift;
-    }
-    v
 }
 
 // Parse the C-like format string and for every conversion specifier consume arguments
 // from args_ptr (pointer to an array of usize words) and print interpreted values.
 // This is intentionally conservative and aims to support common specifiers for debugging:
 // %d %i %u %x %X %p %s %c %f (double) and length modifiers l, ll.
-fn print_parsed_args(tag: &str, fmt: &str, args: &mut core::ffi::VaListImpl<'_>) {
+fn print_parsed_args(_tag: &str, fmt: &str, args: &mut core::ffi::VaListImpl<'_>) {
     let mut param_idx = 0usize;
 
     let mut chars = fmt.chars().peekable();
@@ -479,10 +459,9 @@ pub unsafe extern "C" fn putchar(c: i32) -> i32 {
     c
 }
 
+#[allow(non_upper_case_globals)]
 #[unsafe(no_mangle)]
 pub static _ctype_: [u8; 1] = [0];
-
-
 
 /// Sync version of tuh_descriptor_get_device()
 ///
@@ -519,19 +498,22 @@ unsafe fn tuh_descriptor_get_configuration_sync(
     buffer: *mut c_void,
     len: u16,
 ) -> tinyusb_sys::xfer_result_t {
-    let mut result: tinyusb_sys::xfer_result_t = tinyusb_sys::xfer_result_t::XFER_RESULT_INVALID;
-    let ok = tinyusb_sys::tuh_descriptor_get_configuration(
-        daddr,
-        config_index as _,
-        buffer,
-        len,
-        None,
-        &mut result as *mut _ as usize,
-    );
-    if !ok {
-        tinyusb_sys::xfer_result_t::XFER_RESULT_TIMEOUT
-    } else {
-        result
+    unsafe {
+        let mut result: tinyusb_sys::xfer_result_t =
+            tinyusb_sys::xfer_result_t::XFER_RESULT_INVALID;
+        let ok = tinyusb_sys::tuh_descriptor_get_configuration(
+            daddr,
+            config_index as _,
+            buffer,
+            len,
+            None,
+            &mut result as *mut _ as usize,
+        );
+        if !ok {
+            tinyusb_sys::xfer_result_t::XFER_RESULT_TIMEOUT
+        } else {
+            result
+        }
     }
 }
 
@@ -597,174 +579,6 @@ fn parse_and_print_hid_poll_interval(daddr: u8, buf: &[u8]) {
     );
 }
 
-// KEYCODE to ASCII conversion table (128 entries) — matches the provided C HID_KEYCODE_TO_ASCII mapping
-static KEYCODE2ASCII: [[u8; 2]; 128] = [
-    /* 0x00 - 0x07 */ [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [b'a', b'A'],
-    [b'b', b'B'],
-    [b'c', b'C'],
-    [b'd', b'D'],
-    /* 0x08 - 0x0f */ [b'e', b'E'],
-    [b'f', b'F'],
-    [b'g', b'G'],
-    [b'h', b'H'],
-    [b'i', b'I'],
-    [b'j', b'J'],
-    [b'k', b'K'],
-    [b'l', b'L'],
-    /* 0x10 - 0x17 */ [b'm', b'M'],
-    [b'n', b'N'],
-    [b'o', b'O'],
-    [b'p', b'P'],
-    [b'q', b'Q'],
-    [b'r', b'R'],
-    [b's', b'S'],
-    [b't', b'T'],
-    /* 0x18 - 0x1f */ [b'u', b'U'],
-    [b'v', b'V'],
-    [b'w', b'W'],
-    [b'x', b'X'],
-    [b'y', b'Y'],
-    [b'z', b'Z'],
-    [b'1', b'!'],
-    [b'2', b'@'],
-    /* 0x20 - 0x27 */ [b'3', b'#'],
-    [b'4', b'$'],
-    [b'5', b'%'],
-    [b'6', b'^'],
-    [b'7', b'&'],
-    [b'8', b'*'],
-    [b'9', b'('],
-    [b'0', b')'],
-    /* 0x28 - 0x2f */ [b'\r', b'\r'],
-    [0x1b, 0x1b],
-    [0x08, 0x08],
-    [b'\t', b'\t'],
-    [b' ', b' '],
-    [b'-', b'_'],
-    [b'=', b'+'],
-    [b'[', b'{'],
-    /* 0x30 - 0x37 */ [b']', b'}'],
-    [b'\\', b'|'],
-    [b'#', b'~'],
-    [b';', b':'],
-    [b'\'', b'"'],
-    [b'`', b'~'],
-    [b',', b'<'],
-    [b'.', b'>'],
-    /* 0x38 - 0x3f */ [b'/', b'?'],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    /* 0x40 - 0x47 */ [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    /* 0x48 - 0x4f */ [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    /* 0x50 - 0x57 */ [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    /* 0x58 - 0x5f */ [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    /* 0x60 - 0x67 */ [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    /* Numeric keypad (placed at positions 0x54..0x67 in original C mapping) */
-    /* We now explicitly set the keypad entries at their correct indices by listing the array in index order — below entries correspond to 0x68..0x7f padding to reach 128 total entries. */
-    /* 0x68 - 0x6f */
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    /* 0x70 - 0x77 */ [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    /* 0x78 - 0x7f */ [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-];
-
-fn find_key_in_report(report: &tinyusb_sys::hid_keyboard_report_t, keycode: u8) -> bool {
-    report.keycode.iter().any(|&k| k == keycode)
-}
-
-#[allow(static_mut_refs)]
-fn process_kbd_report(dev_addr: u8, report: &tinyusb_sys::hid_keyboard_report_t) {
-    static mut PREV_REPORT: tinyusb_sys::hid_keyboard_report_t =
-        tinyusb_sys::hid_keyboard_report_t {
-            modifier: 0,
-            reserved: 0,
-            keycode: [0; 6],
-        };
-    let mut flush = false;
-
-    for &keycode in &report.keycode {
-        if keycode != 0 {
-            let existed = unsafe { find_key_in_report(&PREV_REPORT, keycode) };
-            if !existed {
-                println!("Key Down: {keycode}");
-            }
-        }
-    }
-
-    if flush {
-        // tud_cdc_write_flush();
-        println!();
-    }
-
-    unsafe {
-        PREV_REPORT = *report;
-    }
-}
-
 fn dump_and_find_interrupt_endpoints(daddr: u8, buf: &[u8]) {
     if buf.len() < 9 {
         println!("Config descriptor too short");
@@ -797,7 +611,6 @@ fn dump_and_find_interrupt_endpoints(daddr: u8, buf: &[u8]) {
     }
 
     let mut i = 0usize;
-    let mut cur_interface: Option<u8> = None;
     while i + 2 <= total_len {
         let b_len = buf[i] as usize;
         let b_desc_type = buf.get(i + 1).copied().unwrap_or(0);
@@ -815,7 +628,6 @@ fn dump_and_find_interrupt_endpoints(daddr: u8, buf: &[u8]) {
                 let iface_class = buf.get(i + 5).copied().unwrap_or(0);
                 let iface_subclass = buf.get(i + 6).copied().unwrap_or(0);
                 let iface_protocol = buf.get(i + 7).copied().unwrap_or(0);
-                cur_interface = Some(if_num);
                 println!(
                     "Interface desc @{}: if={}, alt={}, num_ep={}, class=0x{:02x}, sub=0x{:02x}, prot=0x{:02x}",
                     i, if_num, alt, num_ep, iface_class, iface_subclass, iface_protocol

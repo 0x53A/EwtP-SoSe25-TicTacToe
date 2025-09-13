@@ -1,0 +1,38 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Set up Rust
+        uses: actions/setup-rust@v1
+        with:
+          toolchain: nightly
+
+      - name: Set up ESP toolchain
+        run: |
+          cargo install espup |
+          espup install
+
+      - name: Build project 'demo neopixel_onboard'
+        workdir: ./firmware/demo_neopixel_onboard
+        run: |
+          cargo build --release
+
+      - name: Build project 'demo tic tac toe'
+        workdir: ./firmware/demo_tic_tac_toe
+        run: |
+          cargo build --release
+
+      - name: Build project 'demo usb keyboard'
+        workdir: ./firmware/demo_usb_keyboard
+        run: |
+          cargo build --release

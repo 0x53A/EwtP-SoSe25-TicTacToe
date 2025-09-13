@@ -5,41 +5,28 @@
 
 mod tinyusb_callbacks;
 
-use core::any::Any;
-
 use embassy_executor::Spawner;
 use embassy_time::Duration;
 use embedded_hal::delay::DelayNs;
 use esp_backtrace as _;
 use esp_hal::{
     delay::Delay,
-    dma_buffers,
-    gpio::Io,
-    i2s::master::{DataFormat, Standard},
-    main,
     peripherals::Peripherals,
     time::Rate,
     timer::{AnyTimer, timg::TimerGroup},
-    uart::Uart,
 };
 
 use anyhow::{Result, anyhow};
-use esp_println::{print, println};
-use heapless::Vec;
+use esp_println::println;
 
 use esp_alloc as _;
 
 extern crate alloc;
 
 use alloc::boxed::Box;
-use microfft::real::rfft_512;
-use smart_leds::RGB8;
 use smart_leds::SmartLedsWrite;
 
 type NeopixelT<'a> = ws2812_spi::Ws2812<esp_hal::spi::master::Spi<'a, esp_hal::Blocking>>;
-
-use core::ffi::c_void;
-use core::ptr;
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
@@ -102,11 +89,9 @@ async fn _main(spawner: Spawner) -> Result<!> {
         neopixel.write([blue]).map_err(|err| anyhow!("{:?}", err))?;
         delay.delay_ms(100u32);
     }
-    
 
     static mut NEOPIXEL: Option<&'static mut NeopixelT> = None;
-    unsafe {
-        NEOPIXEL = Some(Box::leak(Box::new(neopixel)));
+    unsafe { NEOPIXEL = Some(Box::leak(Box::new(neopixel))) };
 
     // this callback will be invoked for each HID report received
     tinyusb_callbacks::set_rust_hid_report_callback(Some(|dev_addr, instance, report, len| {
@@ -137,8 +122,6 @@ async fn _main(spawner: Spawner) -> Result<!> {
     println!("initializing tinyusb ...");
     init_tinyusb();
     println!("tinyusb initialized");
-    }
-
 
     println!("Spawning interrupt count task ...");
     let spawn_result = spawner.spawn(print_interrupt_count_task());
@@ -166,7 +149,9 @@ fn init_usb_phy() {
 
         // Reset USB peripheral by pulsing the reset register
         system.perip_rst_en0().modify(|_, w| w.usb_rst().set_bit());
-        system.perip_rst_en0().modify(|_, w| w.usb_rst().clear_bit());
+        system
+            .perip_rst_en0()
+            .modify(|_, w| w.usb_rst().clear_bit());
 
         let usb_dev = esp32s3::USB_DEVICE::steal();
 
@@ -179,7 +164,6 @@ fn init_usb_phy() {
         usb_0
             .gintsts()
             .modify(|_, w| w.modemis().clear_bit_by_one().sof().clear_bit_by_one());
-
 
         let usb_wrap = esp32s3::USB_WRAP::steal();
         usb_wrap.otg_conf().modify(|_, w| {
@@ -292,5 +276,3 @@ fn init_tinyusb() {
 
     println!("tinyusb host initialized");
 }
-
-

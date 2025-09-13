@@ -16,7 +16,7 @@ static TUSB_BOUND: AtomicBool = AtomicBool::new(false);
 
 pub static INTERRUPT_COUNTER: AtomicU32 = AtomicU32::new(0);
 
-pub unsafe extern "C" fn interrupt_trampoline() {
+pub extern "C" fn interrupt_trampoline() {
     unsafe {
         INTERRUPT_COUNTER.fetch_add(1, Ordering::SeqCst);
 
@@ -252,18 +252,6 @@ unsafe fn cstr_to_str(ptr: *const c_char) -> &'static str {
         let slice = core::slice::from_raw_parts(ptr as *const u8, len);
         core::str::from_utf8_unchecked(slice)
     }
-}
-
-// Helper: read n usize-sized words from args pointer and assemble into u64 (little-endian)
-fn read_u64_from_words(words: &[usize]) -> u64 {
-    let mut v: u64 = 0;
-    let word_bytes = core::mem::size_of::<usize>();
-    // little-endian target assumed
-    for (i, &w) in words.iter().enumerate().take(8_usize.div_ceil(word_bytes)) {
-        let shift = (i * word_bytes) * 8;
-        v |= (w as u64) << shift;
-    }
-    v
 }
 
 // Parse the C-like format string and for every conversion specifier consume arguments
@@ -590,174 +578,6 @@ fn parse_and_print_hid_poll_interval(daddr: u8, buf: &[u8]) {
         "Device {}: no HID interrupt IN endpoint found in config descriptor",
         daddr
     );
-}
-
-// KEYCODE to ASCII conversion table (128 entries) — matches the provided C HID_KEYCODE_TO_ASCII mapping
-static KEYCODE2ASCII: [[u8; 2]; 128] = [
-    /* 0x00 - 0x07 */ [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [b'a', b'A'],
-    [b'b', b'B'],
-    [b'c', b'C'],
-    [b'd', b'D'],
-    /* 0x08 - 0x0f */ [b'e', b'E'],
-    [b'f', b'F'],
-    [b'g', b'G'],
-    [b'h', b'H'],
-    [b'i', b'I'],
-    [b'j', b'J'],
-    [b'k', b'K'],
-    [b'l', b'L'],
-    /* 0x10 - 0x17 */ [b'm', b'M'],
-    [b'n', b'N'],
-    [b'o', b'O'],
-    [b'p', b'P'],
-    [b'q', b'Q'],
-    [b'r', b'R'],
-    [b's', b'S'],
-    [b't', b'T'],
-    /* 0x18 - 0x1f */ [b'u', b'U'],
-    [b'v', b'V'],
-    [b'w', b'W'],
-    [b'x', b'X'],
-    [b'y', b'Y'],
-    [b'z', b'Z'],
-    [b'1', b'!'],
-    [b'2', b'@'],
-    /* 0x20 - 0x27 */ [b'3', b'#'],
-    [b'4', b'$'],
-    [b'5', b'%'],
-    [b'6', b'^'],
-    [b'7', b'&'],
-    [b'8', b'*'],
-    [b'9', b'('],
-    [b'0', b')'],
-    /* 0x28 - 0x2f */ [b'\r', b'\r'],
-    [0x1b, 0x1b],
-    [0x08, 0x08],
-    [b'\t', b'\t'],
-    [b' ', b' '],
-    [b'-', b'_'],
-    [b'=', b'+'],
-    [b'[', b'{'],
-    /* 0x30 - 0x37 */ [b']', b'}'],
-    [b'\\', b'|'],
-    [b'#', b'~'],
-    [b';', b':'],
-    [b'\'', b'"'],
-    [b'`', b'~'],
-    [b',', b'<'],
-    [b'.', b'>'],
-    /* 0x38 - 0x3f */ [b'/', b'?'],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    /* 0x40 - 0x47 */ [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    /* 0x48 - 0x4f */ [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    /* 0x50 - 0x57 */ [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    /* 0x58 - 0x5f */ [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    /* 0x60 - 0x67 */ [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    /* Numeric keypad (placed at positions 0x54..0x67 in original C mapping) */
-    /* We now explicitly set the keypad entries at their correct indices by listing the array in index order — below entries correspond to 0x68..0x7f padding to reach 128 total entries. */
-    /* 0x68 - 0x6f */
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    /* 0x70 - 0x77 */ [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    /* 0x78 - 0x7f */ [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-    [0, 0],
-];
-
-fn find_key_in_report(report: &tinyusb_sys::hid_keyboard_report_t, keycode: u8) -> bool {
-    report.keycode.contains(&keycode)
-}
-
-#[allow(static_mut_refs)]
-fn process_kbd_report(_dev_addr: u8, report: &tinyusb_sys::hid_keyboard_report_t) {
-    static mut PREV_REPORT: tinyusb_sys::hid_keyboard_report_t =
-        tinyusb_sys::hid_keyboard_report_t {
-            modifier: 0,
-            reserved: 0,
-            keycode: [0; 6],
-        };
-    let flush = false;
-
-    for &keycode in &report.keycode {
-        if keycode != 0 {
-            let existed = unsafe { find_key_in_report(&PREV_REPORT, keycode) };
-            if !existed {
-                println!("Key Down: {keycode}");
-            }
-        }
-    }
-
-    if flush {
-        // tud_cdc_write_flush();
-        println!();
-    }
-
-    unsafe {
-        PREV_REPORT = *report;
-    }
 }
 
 fn dump_and_find_interrupt_endpoints(daddr: u8, buf: &[u8]) {
