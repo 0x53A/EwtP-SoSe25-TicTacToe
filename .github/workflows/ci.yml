@@ -19,7 +19,7 @@ jobs:
 
       - name: Set up ESP toolchain
         run: |
-          cargo install espup |
+          cargo install espup --locked
           espup install
 
       - name: Build project 'demo neopixel_onboard'
