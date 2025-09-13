@@ -247,6 +247,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "demo_neopixel_onboard"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "critical-section",
+ "embedded-graphics",
+ "embedded-hal 1.0.0",
+ "esp-alloc",
+ "esp-backtrace",
+ "esp-bootloader-esp-idf",
+ "esp-hal",
+ "esp-hal-wifimanager",
+ "esp-println",
+ "esp-wifi",
+ "fugit",
+ "heapless",
+ "libm",
+ "microfft",
+ "nb 1.1.0",
+ "smart-leds",
+ "smart-leds-trait",
+ "ssd1306",
+ "ws2812-spi",
+]
+
+[[package]]
 name = "digest"
 version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -979,32 +1005,6 @@ checksum = "a7680f79e3a4770e59c2dc25b17dcd852921ee57ffae9a4c4806c9ca5001d54d"
 dependencies = [
  "critical-section",
  "vcell",
-]
-
-[[package]]
-name = "esp32_partylight"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "critical-section",
- "embedded-graphics",
- "embedded-hal 1.0.0",
- "esp-alloc",
- "esp-backtrace",
- "esp-bootloader-esp-idf",
- "esp-hal",
- "esp-hal-wifimanager",
- "esp-println",
- "esp-wifi",
- "fugit",
- "heapless",
- "libm",
- "microfft",
- "nb 1.1.0",
- "smart-leds",
- "smart-leds-trait",
- "ssd1306",
- "ws2812-spi",
 ]
 
 [[package]]
